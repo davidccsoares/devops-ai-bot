@@ -1,0 +1,7 @@
+node_modules/
+local.settings.json
+.env
+.vscode/
+bin/
+obj/
+WEBHOOK-SETUP-PLAN.md
