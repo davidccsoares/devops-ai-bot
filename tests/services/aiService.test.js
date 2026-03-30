@@ -1,28 +1,6 @@
 const { describe, it, beforeEach, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
-
-/**
- * Builds a mock Azure Function context that captures log calls.
- */
-function mockContext() {
-  const logs = [];
-  const log = (...args) => logs.push(["log", ...args]);
-  log.warn = (...args) => logs.push(["warn", ...args]);
-  log.error = (...args) => logs.push(["error", ...args]);
-  return { log, logs };
-}
-
-/**
- * Helper to create a mock fetch response.
- */
-function mockFetchResponse(body, { ok = true, status = 200 } = {}) {
-  return {
-    ok,
-    status,
-    json: async () => body,
-    text: async () => JSON.stringify(body),
-  };
-}
+const { mockContext, mockFetchResponse } = require("../helpers/testUtils");
 
 // ---------------------------------------------------------------------------
 // parseAIResponse (synchronous, no fetch mocking needed)

@@ -1,6 +1,7 @@
 const { createHandler } = require("../utils/handlerFactory");
 const { escapeHtml } = require("../utils/htmlEscape");
 const { capitalize } = require("../utils/capitalize");
+const { coerceEnum, coerceString } = require("../utils/validateAIResponse");
 const {
   extractWorkItemDataFromWebhook,
   postCommentToWorkItem,
@@ -12,9 +13,9 @@ const promptModule = require("../prompts/estimateTimePrompt");
  * (Work item comments support HTML.)
  */
 function formatComment(estimation) {
-  const complexity = estimation.complexity || "N/A";
-  const risk = estimation.riskLevel || "N/A";
-  const reasoning = escapeHtml(estimation.reasoning || "No reasoning provided.");
+  const complexity = coerceEnum(estimation.complexity, ["low", "medium", "high"], "N/A");
+  const risk = coerceEnum(estimation.riskLevel, ["low", "medium", "high"], "N/A");
+  const reasoning = escapeHtml(coerceString(estimation.reasoning, "No reasoning provided."));
 
   let timeRange = "N/A";
   if (estimation.estimatedTimeInDays) {
@@ -32,9 +33,9 @@ function formatComment(estimation) {
   return (
     "<h3>&#9202; AI Time Estimation</h3>\n" +
     "<table>\n" +
-    `  <tr><td><b>Estimated Complexity</b></td><td>${complexityIcon} ${capitalize(complexity)}</td></tr>\n` +
-    `  <tr><td><b>Estimated Time</b></td><td>${timeRange}</td></tr>\n` +
-    `  <tr><td><b>Risk Level</b></td><td>${riskIcon} ${capitalize(risk)}</td></tr>\n` +
+    `  <tr><td><b>Estimated Complexity</b></td><td>${complexityIcon} ${escapeHtml(capitalize(complexity))}</td></tr>\n` +
+    `  <tr><td><b>Estimated Time</b></td><td>${escapeHtml(timeRange)}</td></tr>\n` +
+    `  <tr><td><b>Risk Level</b></td><td>${riskIcon} ${escapeHtml(capitalize(risk))}</td></tr>\n` +
     "</table>\n\n" +
     "<h4>Reasoning</h4>\n" +
     `<p>${reasoning}</p>\n\n` +
@@ -67,4 +68,4 @@ const estimateTime = createHandler({
   }),
 });
 
-module.exports = { estimateTime };
+module.exports = { estimateTime, formatComment };

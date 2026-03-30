@@ -1,7 +1,7 @@
 {
   "name": "devops-ai-bot",
   "version": "1.0.0",
-  "description": "AI-powered Azure DevOps automation bot – analyzes tickets, estimates time, and generates release notes.",
+  "description": "AI-powered Azure DevOps automation bot – analyzes tickets and estimates time.",
   "main": "index.js",
   "scripts": {
     "start": "func start",

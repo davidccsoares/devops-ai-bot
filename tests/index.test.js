@@ -29,7 +29,6 @@ describe("index.js router", () => {
     // Mock the handler modules to avoid real AI/DevOps calls
     const mockAnalyze = async () => ({ mock: "analyzeTicket" });
     const mockEstimate = async () => ({ mock: "estimateTime" });
-    const mockRelease = async () => ({ mock: "generateReleaseNotes" });
 
     require.cache[require.resolve("../functions/ticketAnalyzer")] = {
       id: require.resolve("../functions/ticketAnalyzer"),
@@ -43,12 +42,6 @@ describe("index.js router", () => {
       loaded: true,
       exports: { estimateTime: mockEstimate },
     };
-    require.cache[require.resolve("../functions/releaseNotesGenerator")] = {
-      id: require.resolve("../functions/releaseNotesGenerator"),
-      filename: require.resolve("../functions/releaseNotesGenerator"),
-      loaded: true,
-      exports: { generateReleaseNotes: mockRelease },
-    };
 
     handler = require("../index");
   });
@@ -57,7 +50,6 @@ describe("index.js router", () => {
     delete require.cache[require.resolve("../index")];
     delete require.cache[require.resolve("../functions/ticketAnalyzer")];
     delete require.cache[require.resolve("../functions/timeEstimator")];
-    delete require.cache[require.resolve("../functions/releaseNotesGenerator")];
   });
 
   it("returns 400 for missing body", async () => {
@@ -85,16 +77,43 @@ describe("index.js router", () => {
 
   it("routes workitem.updated to time estimator", async () => {
     const ctx = makeContext();
+    // No resource.fields → can't determine, should process anyway
     await handler(ctx, { body: { eventType: "workitem.updated" } });
     assert.equal(ctx.res.status, 200);
     assert.deepEqual(ctx.res.body, { mock: "estimateTime" });
   });
 
-  it("routes git.pullrequest.merged to release notes generator", async () => {
+  it("routes workitem.updated when Title changed", async () => {
     const ctx = makeContext();
-    await handler(ctx, { body: { eventType: "git.pullrequest.merged" } });
+    await handler(ctx, {
+      body: {
+        eventType: "workitem.updated",
+        resource: {
+          fields: {
+            "System.Title": { oldValue: "Old title", newValue: "New title" },
+          },
+        },
+      },
+    });
     assert.equal(ctx.res.status, 200);
-    assert.deepEqual(ctx.res.body, { mock: "generateReleaseNotes" });
+    assert.deepEqual(ctx.res.body, { mock: "estimateTime" });
+  });
+
+  it("skips workitem.updated when only irrelevant fields changed", async () => {
+    const ctx = makeContext();
+    await handler(ctx, {
+      body: {
+        eventType: "workitem.updated",
+        resource: {
+          fields: {
+            "System.State": { oldValue: "New", newValue: "Active" },
+            "System.AssignedTo": { oldValue: "", newValue: "john@example.com" },
+          },
+        },
+      },
+    });
+    assert.equal(ctx.res.status, 200);
+    assert.match(ctx.res.body.message, /skipped/);
   });
 
   it("returns 200 with message for unhandled event types", async () => {

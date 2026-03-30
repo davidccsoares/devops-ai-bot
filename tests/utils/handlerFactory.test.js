@@ -1,16 +1,6 @@
 const { describe, it, beforeEach, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
-
-/**
- * Builds a mock Azure Function context that captures log calls.
- */
-function mockContext() {
-  const logs = [];
-  const log = (...args) => logs.push(["log", ...args]);
-  log.warn = (...args) => logs.push(["warn", ...args]);
-  log.error = (...args) => logs.push(["error", ...args]);
-  return { log, logs };
-}
+const { mockContext } = require("../helpers/testUtils");
 
 describe("createHandler (handlerFactory)", () => {
   let createHandler;
@@ -85,7 +75,7 @@ describe("createHandler (handlerFactory)", () => {
         callOrder.push("formatComment");
         return `Comment: ${aiResult.analysis}`;
       },
-      postComment: async (data, comment, ctx) => {
+      postComment: async (_data, _comment, _ctx) => {
         callOrder.push("postComment");
       },
       buildResult: (data, aiResult) => {

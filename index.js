@@ -2,7 +2,6 @@ const crypto = require("node:crypto");
 const { validateEnv } = require("./utils/validateEnv");
 const { analyzeTicket } = require("./functions/ticketAnalyzer");
 const { estimateTime } = require("./functions/timeEstimator");
-const { generateReleaseNotes } = require("./functions/releaseNotesGenerator");
 
 // Validate env vars once at cold-start, not on every request.
 // In Azure Functions, this runs when the host loads the module.
@@ -11,12 +10,32 @@ validateEnv();
 /**
  * Handler registry – maps Azure DevOps webhook eventType strings to handler functions.
  * To add a new handler: import it above, then add an entry here. No switch editing needed.
+ *
+ * Optional `shouldHandle(body)` predicate – if provided, the handler is skipped when it returns false.
  */
 const handlers = {
   "workitem.created": { fn: analyzeTicket, label: "Ticket Analyzer" },
-  "workitem.updated": { fn: estimateTime, label: "Time Estimator" },
-  "git.pullrequest.merged": { fn: generateReleaseNotes, label: "Release Notes Generator" },
+  "workitem.updated": {
+    fn: estimateTime,
+    label: "Time Estimator",
+    shouldHandle: hasRelevantFieldChange,
+  },
 };
+
+/**
+ * Returns true if the workitem.updated payload contains a change to Title or Description.
+ * Azure DevOps updated payloads include changed fields with oldValue/newValue pairs.
+ * If the payload format is unexpected, defaults to true (process anyway).
+ */
+function hasRelevantFieldChange(body) {
+  const fields = body?.resource?.fields;
+  if (!fields) return true; // Can't determine — process anyway
+
+  const relevant = ["System.Title", "System.Description"];
+  return relevant.some(
+    (key) => fields[key] && typeof fields[key] === "object" && "newValue" in fields[key]
+  );
+}
 
 /**
  * Wraps the Azure Function context with a correlation-ID prefix on every log call.
@@ -84,8 +103,14 @@ module.exports = async function (context, req) {
     const handler = handlers[eventType];
 
     if (handler) {
-      ctx.log(`Routing to ${handler.label}...`);
-      result = await handler.fn(body, ctx);
+      // If the handler has a shouldHandle predicate, check it first.
+      if (handler.shouldHandle && !handler.shouldHandle(body)) {
+        ctx.log(`${handler.label} - skipped (no relevant field changes).`);
+        result = { message: `Event acknowledged but skipped (no relevant changes).` };
+      } else {
+        ctx.log(`Routing to ${handler.label}...`);
+        result = await handler.fn(body, ctx);
+      }
     } else {
       ctx.log(`Unhandled event type: ${eventType}. Acknowledging.`);
       result = { message: `Event type "${eventType}" is not handled.` };

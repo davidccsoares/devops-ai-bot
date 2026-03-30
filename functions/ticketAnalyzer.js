@@ -1,5 +1,6 @@
 const { createHandler } = require("../utils/handlerFactory");
 const { escapeHtml } = require("../utils/htmlEscape");
+const { coerceNumber, coerceString, coerceStringArray } = require("../utils/validateAIResponse");
 const {
   extractWorkItemDataFromWebhook,
   postCommentToWorkItem,
@@ -11,21 +12,23 @@ const promptModule = require("../prompts/analyzeTicketPrompt");
  * (Work item comments support HTML.)
  */
 function formatComment(analysis) {
-  const score = analysis.qualityScore !== null && analysis.qualityScore !== undefined ? escapeHtml(analysis.qualityScore) : "N/A";
+  const score = coerceNumber(analysis.qualityScore, 0, 10, null);
+  const scoreDisplay = score !== null ? escapeHtml(score) : "N/A";
+
+  const missingItems = coerceStringArray(analysis.missingInformation);
   const missing =
-    Array.isArray(analysis.missingInformation) &&
-    analysis.missingInformation.length > 0
-      ? analysis.missingInformation.map((m) => `<li>${escapeHtml(m)}</li>`).join("")
+    missingItems.length > 0
+      ? missingItems.map((m) => `<li>${escapeHtml(m)}</li>`).join("")
       : "<li>None identified</li>";
 
   const tooLarge = analysis.isTooLarge ? "Yes" : "No";
   const shouldSplit = analysis.shouldSplit ? "Yes" : "No";
-  const improvements = escapeHtml(analysis.suggestedImprovements || "No suggestions.");
+  const improvements = escapeHtml(coerceString(analysis.suggestedImprovements, "No suggestions."));
 
   return (
     "<h3>&#129302; AI Ticket Analysis</h3>\n" +
     "<table>\n" +
-    `  <tr><td><b>Quality Score</b></td><td>${score} / 10</td></tr>\n` +
+    `  <tr><td><b>Quality Score</b></td><td>${scoreDisplay} / 10</td></tr>\n` +
     `  <tr><td><b>Too Large?</b></td><td>${tooLarge}</td></tr>\n` +
     `  <tr><td><b>Should Split?</b></td><td>${shouldSplit}</td></tr>\n` +
     "</table>\n\n" +
@@ -62,4 +65,4 @@ const analyzeTicket = createHandler({
   }),
 });
 
-module.exports = { analyzeTicket };
+module.exports = { analyzeTicket, formatComment };
