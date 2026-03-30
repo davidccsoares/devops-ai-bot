@@ -13,11 +13,13 @@ describe("createHandler (handlerFactory)", () => {
     ORIGINAL_ENV.AI_API_KEY = process.env.AI_API_KEY;
     ORIGINAL_ENV.AI_MODEL = process.env.AI_MODEL;
     ORIGINAL_ENV.AI_TIMEOUT_MS = process.env.AI_TIMEOUT_MS;
+    ORIGINAL_ENV.AI_MAX_RETRIES = process.env.AI_MAX_RETRIES;
 
     process.env.AI_API_URL = "https://ai.example.com/v1/chat/completions";
     process.env.AI_API_KEY = "test-key-123";
     process.env.AI_MODEL = "test-model";
     process.env.AI_TIMEOUT_MS = "5000";
+    process.env.AI_MAX_RETRIES = "1"; // Keep retries minimal for fast tests
 
     originalFetch = global.fetch;
 
@@ -320,5 +322,80 @@ describe("createHandler (handlerFactory)", () => {
     // The raw text should be HTML-escaped in the comment
     assert.ok(!capturedComment.includes("<script>"));
     assert.ok(capturedComment.includes("&lt;script&gt;"));
+  });
+
+  it("degrades gracefully when AI API fails", async () => {
+    // Mock fetch to always fail
+    global.fetch = async () => {
+      throw new Error("Network error");
+    };
+
+    let capturedComment;
+
+    const handler = createHandler({
+      name: "DegradedTest",
+      extract: () => ({ id: 5, project: "proj" }),
+      logExtracted: () => {},
+      promptModule: {
+        getSystemPrompt: () => "sys",
+        buildUserMessage: () => "msg",
+      },
+      formatComment: () => "should not be called",
+      postComment: async (_data, comment) => {
+        capturedComment = comment;
+      },
+      buildResult: (data, aiResult) => ({ id: data.id, aiResult }),
+    });
+
+    const ctx = mockContext();
+    // Should NOT throw — the AI error is caught
+    const result = await handler({}, ctx);
+
+    // Should have posted a degraded comment
+    assert.ok(capturedComment, "Expected a degraded comment to be posted");
+    assert.ok(capturedComment.includes("Temporarily Unavailable"));
+    assert.ok(capturedComment.includes("DegradedTest"));
+
+    // Result should indicate degraded state
+    assert.equal(result.id, 5);
+    assert.equal(result.aiResult.degraded, true);
+    assert.ok(result.aiResult.error);
+
+    // An error should have been logged
+    assert.ok(
+      ctx.logs.some(([level]) => level === "error"),
+      "Expected an error log for the AI failure"
+    );
+  });
+
+  it("tolerates both AI failure and postComment failure", async () => {
+    // Mock fetch to always fail (AI unreachable)
+    global.fetch = async () => {
+      throw new Error("Network error");
+    };
+
+    const handler = createHandler({
+      name: "DoubleFailTest",
+      extract: () => ({ id: 1 }),
+      logExtracted: () => {},
+      promptModule: {
+        getSystemPrompt: () => "sys",
+        buildUserMessage: () => "msg",
+      },
+      formatComment: () => "unused",
+      postComment: async () => {
+        throw new Error("DevOps also down");
+      },
+      buildResult: (data, aiResult) => ({ id: data.id, aiResult }),
+    });
+
+    const ctx = mockContext();
+    // Should NOT throw even when both AI and DevOps fail
+    const result = await handler({}, ctx);
+
+    assert.equal(result.aiResult.degraded, true);
+    // Should have logged errors for both failures
+    const errorLogs = ctx.logs.filter(([level]) => level === "error");
+    assert.ok(errorLogs.length >= 2, "Expected at least 2 error logs");
   });
 });

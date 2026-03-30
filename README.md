@@ -19,6 +19,17 @@ A single HTTP endpoint receives all webhook events and routes them to the correc
 | `workitem.created` | Ticket Analyzer | Analyses quality, scores 1-10, suggests improvements |
 | `workitem.updated` | Time Estimator | Estimates complexity, duration, and risk |
 
+### Security & Resilience
+
+- **HMAC-SHA256 webhook verification** – optional signature validation via `WEBHOOK_SECRET`
+- **Rate limiting** – in-memory sliding-window limiter protects against request floods
+- **Deduplication** – in-memory TTL cache prevents processing duplicate webhook deliveries
+- **Payload validation** – rejects malformed payloads with clear 400 errors
+- **Graceful degradation** – when the AI API is unreachable, posts a "temporarily unavailable" comment instead of failing
+- **Error-tolerant comment posting** – comment post failures are logged but don't prevent the result from being returned
+- **Prompt injection mitigation** – user data is delimited and truncated before being sent to the AI
+- **AI response validation** – coerces AI output to expected types with safe defaults
+
 ---
 
 ## Project Structure
@@ -35,14 +46,19 @@ devops-ai-bot/
 │   ├── analyzeTicketPrompt.js     # Prompt for ticket analysis
 │   └── estimateTimePrompt.js      # Prompt for time estimation
 ├── utils/
+│   ├── capitalize.js              # Shared string capitalize utility
+│   ├── dedupCache.js              # In-memory dedup cache with TTL + periodic pruning
 │   ├── fetchWithRetry.js          # HTTP fetch with timeout + exponential backoff retry
 │   ├── handlerFactory.js          # Shared handler pattern (extract → AI → post)
 │   ├── htmlEscape.js              # HTML escaping for safe comment rendering
-│   ├── capitalize.js              # Shared string capitalize utility
+│   ├── rateLimiter.js             # Sliding-window rate limiter
 │   ├── sanitizeInput.js           # Prompt injection mitigation (input delimiting + truncation)
+│   ├── structuredLog.js           # Structured JSON logging for Application Insights
 │   ├── validateAIResponse.js      # AI response schema validation (coerce with safe defaults)
-│   └── validateEnv.js             # Startup env var validation
-├── tests/                         # Unit tests (Node.js built-in test runner) — 114 tests
+│   ├── validateEnv.js             # Startup env var validation
+│   ├── validatePayload.js         # Webhook payload structure validation
+│   └── verifySignature.js         # HMAC-SHA256 webhook signature verification
+├── tests/                         # Unit & integration tests (Node.js built-in test runner)
 ├── devops-webhook/
 │   └── function.json              # Azure Function binding (POST /api/devops-webhook)
 ├── health/
@@ -80,7 +96,9 @@ npm install
 
 ### 2. Configure environment variables
 
-Edit `local.settings.json` (never commit this file):
+Edit `local.settings.json` (never commit this file). See `local.settings.json.example` for a template.
+
+#### Required variables
 
 | Variable | Description |
 |---|---|
@@ -90,12 +108,19 @@ Edit `local.settings.json` (never commit this file):
 | `AI_API_KEY` | Your API key for the AI service |
 | `AI_MODEL` | Model identifier, e.g. `mistralai/mistral-7b-instruct:free` |
 
-Optional tuning variables:
+#### Optional tuning variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `AI_TIMEOUT_MS` | `30000` | Timeout for AI API calls (ms) |
+| `AI_MAX_RETRIES` | `3` | Maximum retry attempts for AI API calls |
+| `AI_MAX_RESPONSE_SIZE` | `102400` | Maximum AI response size in characters (100KB) |
 | `DEVOPS_TIMEOUT_MS` | `30000` | Timeout for Azure DevOps API calls (ms) |
+| `DEVOPS_MAX_RETRIES` | `3` | Maximum retry attempts for Azure DevOps API calls |
+| `WEBHOOK_SECRET` | _(empty)_ | HMAC-SHA256 secret for webhook signature verification (leave empty to skip) |
+| `DEDUP_TTL_MS` | `300000` | Deduplication cache TTL (5 minutes) |
+| `RATE_LIMIT_MAX` | `60` | Maximum requests per rate-limit window |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit sliding window size (1 minute) |
 
 ### 3. Run locally
 
@@ -105,9 +130,9 @@ func start
 
 The function will start at `http://localhost:7071/api/devops-webhook`.
 
-### 4. Configure Azure DevOps Service Hooks
+The health endpoint is available at `http://localhost:7071/api/health` (returns version, uptime, and config status).
 
-> **Note:** Azure DevOps webhook integration is planned but not yet configured. The Function endpoint is ready to receive webhook payloads — see the section below for manual testing with `curl`.
+### 4. Configure Azure DevOps Service Hooks
 
 In your Azure DevOps project:
 
@@ -131,16 +156,23 @@ The project uses Node's built-in test runner (no external test framework needed)
 npm test
 ```
 
-This runs all `*.test.js` files under `tests/`. Current coverage includes **114 tests across 17 suites**:
+This runs all `*.test.js` files under `tests/`. Current coverage includes **158 tests across 23 suites**:
 
-- **Router tests** — validates event routing, field-change filtering, 400/500 responses, correlation ID header, and error handling.
-- **Health check tests** — validates 200/503 responses based on environment configuration.
-- **AI service tests** — validates `callAI` (env validation, HTTP errors, payload structure, default model) and `parseAIResponse` (JSON, code fences, raw fallback).
+- **Integration tests** — end-to-end flow from webhook receipt through AI call to DevOps comment posting.
+- **Router tests** — validates event routing, field-change filtering, payload validation, rate limiting, dedup, signature verification, and error handling.
+- **Health check tests** — validates 200/503 responses, version info, and timestamps.
+- **AI service tests** — validates `callAI` (env validation, HTTP errors, payload structure, default model, response size guard, AI timing) and `parseAIResponse` (JSON, code fences, raw fallback).
 - **Format comment tests** — validates HTML output for both handlers (ticket, time) including XSS prevention and edge cases.
 - **Extractor tests** — validates webhook payload parsing for work items.
 - **fetchWithRetry tests** — validates timeout, retry, backoff, jitter, and Retry-After behaviour.
-- **Handler factory tests** — validates lifecycle ordering, result building, error propagation, and raw response fallback.
-- **Utility tests** — validates `escapeHtml`, `capitalize`, `validateEnv`, `sanitizeInput`, `coerceNumber`, `coerceEnum`, `coerceString`, and `coerceStringArray`.
+- **Handler factory tests** — validates lifecycle ordering, result building, graceful degradation, error tolerance, and raw response fallback.
+- **Utility tests** — validates `escapeHtml`, `capitalize`, `validateEnv`, `sanitizeInput`, `structuredLog`, `rateLimiter`, `dedupCache`, `validatePayload`, `verifySignature`, and all `coerce*` functions.
+
+### Lint + Test combined
+
+```bash
+npm run check
+```
 
 ---
 
@@ -204,6 +236,12 @@ curl -X POST http://localhost:7071/api/devops-webhook \
   }'
 ```
 
+### Test: health check
+
+```bash
+curl http://localhost:7071/api/health
+```
+
 ---
 
 ## Deploying to Azure
@@ -253,9 +291,12 @@ To add a new handler:
 | `Missing required environment variables` on startup | `local.settings.json` is missing or incomplete | Ensure all four required vars are set (see Setup step 2) |
 | AI returns raw text instead of JSON | Model doesn't follow JSON-only instruction | The parser handles this gracefully, but try a more capable model or add stricter prompting |
 | `401 Unauthorized` from Azure DevOps | PAT is expired or has insufficient permissions | Generate a new PAT with Work Items R/W |
+| `401 Unauthorized` from webhook | `WEBHOOK_SECRET` is set but the sender isn't signing requests | Either configure signing in Azure DevOps or remove `WEBHOOK_SECRET` |
+| `429 Too Many Requests` from the bot | Rate limiter triggered | Increase `RATE_LIMIT_MAX` or `RATE_LIMIT_WINDOW_MS` |
+| `429 Too Many Requests` from AI API | Rate limit hit | Built-in retry with backoff handles this automatically. Consider upgrading your API plan |
 | Function times out (no response) | AI provider is slow or unresponsive | Increase `AI_TIMEOUT_MS` or switch to a faster model/provider |
-| `429 Too Many Requests` from AI API | Rate limit hit | Built-in retry with backoff handles this automatically (3 attempts). Consider upgrading your API plan |
 | Comment not posted to work item | Missing `System.TeamProject` in webhook payload | Ensure the webhook subscription includes project context |
+| AI analysis shows "Temporarily Unavailable" | AI API was unreachable during processing | Check AI API status; the bot degrades gracefully and returns 200 |
 
 ---
 

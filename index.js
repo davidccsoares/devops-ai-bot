@@ -3,6 +3,8 @@ const { validateEnv } = require("./utils/validateEnv");
 const { verifyWebhookSignature } = require("./utils/verifySignature");
 const { DedupCache } = require("./utils/dedupCache");
 const { validatePayload } = require("./utils/validatePayload");
+const { RateLimiter } = require("./utils/rateLimiter");
+const { structuredLog } = require("./utils/structuredLog");
 const { analyzeTicket } = require("./functions/ticketAnalyzer");
 const { estimateTime } = require("./functions/timeEstimator");
 
@@ -13,6 +15,11 @@ validateEnv();
 /** In-memory deduplication cache to skip duplicate webhook deliveries. */
 const dedupTtlMs = parseInt(process.env.DEDUP_TTL_MS, 10) || undefined;
 const dedupCache = new DedupCache(dedupTtlMs);
+
+/** In-memory rate limiter to protect against request floods. */
+const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX, 10) || undefined;
+const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || undefined;
+const rateLimiter = new RateLimiter({ max: rateLimitMax, windowMs: rateLimitWindowMs });
 
 /**
  * Handler registry – maps Azure DevOps webhook eventType strings to handler functions.
@@ -104,6 +111,21 @@ module.exports = async function (context, req) {
       return;
     }
 
+    // Rate-limit protection — reject if too many requests in the current window.
+    const rateCheck = rateLimiter.check();
+    if (!rateCheck.allowed) {
+      ctx.log.warn("Rate limit exceeded.");
+      context.res = {
+        status: 429,
+        headers: {
+          ...responseHeaders,
+          "Retry-After": String(Math.ceil(rateCheck.retryAfterMs / 1000)),
+        },
+        body: { error: "Too many requests. Please try again later." },
+      };
+      return;
+    }
+
     const body = req.body;
 
     if (!body || !body.eventType) {
@@ -184,6 +206,9 @@ module.exports = async function (context, req) {
     };
   } finally {
     const durationMs = Date.now() - startTime;
-    ctx.log(`Request completed in ${durationMs}ms (status ${context.res?.status || "unknown"}).`);
+    structuredLog(ctx, "request_complete", {
+      durationMs,
+      status: context.res?.status || "unknown",
+    });
   }
 };

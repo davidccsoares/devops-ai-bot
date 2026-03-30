@@ -26,6 +26,8 @@ async function callAI(systemPrompt, userMessage, context) {
 
   context.log("Calling AI service...");
 
+  const aiStartTime = Date.now();
+
   const payload = {
     model: AI_MODEL,
     messages: [
@@ -56,12 +58,15 @@ async function callAI(systemPrompt, userMessage, context) {
   );
 
   if (!response.ok) {
+    const aiDurationMs = Date.now() - aiStartTime;
     const errorBody = await response.text();
-    context.log.error(`AI API error ${response.status}: ${errorBody}`);
+    context.log.error(`AI API error ${response.status} after ${aiDurationMs}ms: ${errorBody}`);
     throw new Error(`AI API returned status ${response.status}.`);
   }
 
   const data = await response.json();
+  const aiDurationMs = Date.now() - aiStartTime;
+  context.log(`AI API responded in ${aiDurationMs}ms.`);
 
   // Log token usage if the AI API provides it (OpenAI-compatible format).
   const usage = data?.usage;
