@@ -1,0 +1,5 @@
+node_modules/
+coverage/
+*.log
+local.settings.json
+package-lock.json

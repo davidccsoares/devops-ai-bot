@@ -1,20 +1,15 @@
 const { fetchWithRetry } = require("../utils/fetchWithRetry");
 
-const AZURE_DEVOPS_ORG = process.env.AZURE_DEVOPS_ORG; // e.g. https://dev.azure.com/myorg
-const AZURE_DEVOPS_PAT = process.env.AZURE_DEVOPS_PAT;
-
-/** Default timeout for Azure DevOps API calls (15 seconds). */
-const DEVOPS_TIMEOUT_MS = parseInt(process.env.DEVOPS_TIMEOUT_MS, 10) || 15000;
-
 /**
  * Returns the Base-64-encoded authorisation header value for Azure DevOps.
  * Throws early if the PAT is not configured.
  */
 function authHeader() {
-  if (!AZURE_DEVOPS_PAT) {
+  const pat = process.env.AZURE_DEVOPS_PAT;
+  if (!pat) {
     throw new Error("AZURE_DEVOPS_PAT environment variable is not set.");
   }
-  const token = Buffer.from(`:${AZURE_DEVOPS_PAT}`).toString("base64");
+  const token = Buffer.from(`:${pat}`).toString("base64");
   return `Basic ${token}`;
 }
 
@@ -96,9 +91,10 @@ function extractLinkedWorkItems(resource) {
 
 /** Shared retry options for Azure DevOps API calls. */
 function devopsRetryOpts(context) {
+  const timeoutMs = parseInt(process.env.DEVOPS_TIMEOUT_MS, 10) || 30000;
   return {
     maxRetries: 3,
-    timeoutMs: DEVOPS_TIMEOUT_MS,
+    timeoutMs,
     baseDelayMs: 1000,
     context,
   };
@@ -116,14 +112,17 @@ function devopsRetryOpts(context) {
  * @param {object}        context     - Azure Function context for logging.
  */
 async function postCommentToWorkItem(project, workItemId, commentHtml, context) {
-  if (!AZURE_DEVOPS_ORG || !AZURE_DEVOPS_PAT) {
+  const org = process.env.AZURE_DEVOPS_ORG;
+  const pat = process.env.AZURE_DEVOPS_PAT;
+
+  if (!org || !pat) {
     throw new Error(
       "AZURE_DEVOPS_ORG and AZURE_DEVOPS_PAT environment variables must be set."
     );
   }
 
   const url =
-    `${AZURE_DEVOPS_ORG}/${encodeURIComponent(project)}` +
+    `${org}/${encodeURIComponent(project)}` +
     `/_apis/wit/workItems/${encodeURIComponent(workItemId)}/comments?api-version=7.1-preview.4`;
 
   context.log(`Posting comment to work item ${workItemId} in project "${project}"...`);
@@ -174,14 +173,17 @@ async function postCommentToPullRequest(
   commentContent,
   context
 ) {
-  if (!AZURE_DEVOPS_ORG || !AZURE_DEVOPS_PAT) {
+  const org = process.env.AZURE_DEVOPS_ORG;
+  const pat = process.env.AZURE_DEVOPS_PAT;
+
+  if (!org || !pat) {
     throw new Error(
       "AZURE_DEVOPS_ORG and AZURE_DEVOPS_PAT environment variables must be set."
     );
   }
 
   const url =
-    `${AZURE_DEVOPS_ORG}/${encodeURIComponent(project)}` +
+    `${org}/${encodeURIComponent(project)}` +
     `/_apis/git/repositories/${encodeURIComponent(repositoryId)}` +
     `/pullRequests/${encodeURIComponent(pullRequestId)}/threads?api-version=7.1-preview.1`;
 

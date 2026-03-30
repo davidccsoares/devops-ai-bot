@@ -1,18 +1,11 @@
 const { createHandler } = require("../utils/handlerFactory");
 const { escapeHtml } = require("../utils/htmlEscape");
+const { capitalize } = require("../utils/capitalize");
 const {
   extractWorkItemDataFromWebhook,
   postCommentToWorkItem,
 } = require("../services/azureDevopsService");
 const promptModule = require("../prompts/estimateTimePrompt");
-
-/**
- * Capitalises the first letter of a string.
- */
-function capitalize(str) {
-  if (!str) return str;
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
 
 /**
  * Formats the AI estimation into an HTML comment suitable for Azure DevOps.

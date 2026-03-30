@@ -6,7 +6,7 @@
  *   - HTTP 500, 502, 503, 504 (server errors)
  *   - Network / abort errors
  *
- * Uses exponential backoff: 1s → 2s → 4s (by default).
+ * Uses exponential backoff with jitter: ~1s → ~2s → ~4s (by default).
  *
  * @param {string}  url                - The URL to fetch.
  * @param {object}  options            - Standard fetch options (method, headers, body, etc.).
@@ -32,6 +32,7 @@ async function fetchWithRetry(url, options = {}, retryOpts = {}) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    let overrideDelayMs = null;
 
     try {
       const response = await fetch(url, {
@@ -47,6 +48,16 @@ async function fetchWithRetry(url, options = {}, retryOpts = {}) {
 
       // Retryable HTTP error – log and continue to retry.
       lastError = new Error(`HTTP ${response.status}`);
+
+      // Respect Retry-After header if present (value in seconds or HTTP-date).
+      const retryAfter = response.headers?.get?.("retry-after");
+      if (retryAfter && attempt < maxRetries) {
+        const retryDelaySec = Number(retryAfter);
+        if (!Number.isNaN(retryDelaySec) && retryDelaySec > 0) {
+          overrideDelayMs = Math.min(retryDelaySec * 1000, 60000); // Cap at 60s
+        }
+      }
+
       if (context) {
         context.log.warn(
           `Attempt ${attempt}/${maxRetries} failed with HTTP ${response.status}. ` +
@@ -70,9 +81,10 @@ async function fetchWithRetry(url, options = {}, retryOpts = {}) {
       }
     }
 
-    // Wait before retrying (exponential backoff).
+    // Wait before retrying (exponential backoff with jitter, or Retry-After if provided).
     if (attempt < maxRetries) {
-      const delay = baseDelayMs * Math.pow(2, attempt - 1);
+      const baseDelay = overrideDelayMs || baseDelayMs * Math.pow(2, attempt - 1);
+      const delay = addJitter(baseDelay);
       await sleep(delay);
     }
   }
@@ -82,6 +94,16 @@ async function fetchWithRetry(url, options = {}, retryOpts = {}) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Adds ±25% random jitter to a delay value to prevent thundering herd.
+ * @param {number} ms - The base delay in milliseconds.
+ * @returns {number}    The jittered delay (always >= 1ms).
+ */
+function addJitter(ms) {
+  const jitter = ms * 0.25 * (2 * Math.random() - 1); // ±25%
+  return Math.max(1, Math.round(ms + jitter));
 }
 
 module.exports = { fetchWithRetry };

@@ -1,12 +1,5 @@
 const { fetchWithRetry } = require("../utils/fetchWithRetry");
 
-const AI_API_URL = process.env.AI_API_URL;
-const AI_API_KEY = process.env.AI_API_KEY;
-const AI_MODEL = process.env.AI_MODEL || "mistralai/mistral-7b-instruct:free";
-
-/** Default timeout for AI API calls (30 seconds). */
-const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000;
-
 /**
  * Sends a prompt to the AI API and returns the parsed JSON response.
  *
@@ -18,6 +11,11 @@ const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000;
  * @returns {object}              Parsed JSON from the AI response.
  */
 async function callAI(systemPrompt, userMessage, context) {
+  const AI_API_URL = process.env.AI_API_URL;
+  const AI_API_KEY = process.env.AI_API_KEY;
+  const AI_MODEL = process.env.AI_MODEL || "mistralai/mistral-7b-instruct:free";
+  const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000;
+
   if (!AI_API_URL || !AI_API_KEY) {
     throw new Error(
       "AI_API_URL and AI_API_KEY environment variables must be set."
@@ -34,6 +32,7 @@ async function callAI(systemPrompt, userMessage, context) {
     ],
     temperature: 0.3,
     max_tokens: 2048,
+    response_format: { type: "json_object" },
   };
 
   const response = await fetchWithRetry(
@@ -97,4 +96,4 @@ function parseAIResponse(raw, context) {
   }
 }
 
-module.exports = { callAI };
+module.exports = { callAI, parseAIResponse };

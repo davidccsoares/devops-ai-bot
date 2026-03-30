@@ -131,4 +131,32 @@ describe("fetchWithRetry", () => {
     assert.equal(res.status, 200);
     assert.equal(callCount, 2);
   });
+
+  it("respects Retry-After header on 429", async () => {
+    let callCount = 0;
+    const callTimestamps = [];
+    global.fetch = async () => {
+      callCount++;
+      callTimestamps.push(Date.now());
+      if (callCount === 1) {
+        return {
+          ok: false,
+          status: 429,
+          headers: { get: (name) => name === "retry-after" ? "0.05" : null },
+        };
+      }
+      return { ok: true, status: 200 };
+    };
+
+    const res = await fetchWithRetry("http://example.com", {}, {
+      maxRetries: 3,
+      timeoutMs: 5000,
+      baseDelayMs: 5000, // Very long default — should be overridden by Retry-After
+    });
+    assert.equal(res.status, 200);
+    assert.equal(callCount, 2);
+    // The gap between calls should be close to 50ms (Retry-After: 0.05s), not 5000ms
+    const gap = callTimestamps[1] - callTimestamps[0];
+    assert.ok(gap < 500, `Expected gap < 500ms, got ${gap}ms`);
+  });
 });

@@ -65,12 +65,14 @@ describe("index.js router", () => {
     await handler(ctx, { body: null });
     assert.equal(ctx.res.status, 400);
     assert.match(ctx.res.body.error, /Missing eventType/);
+    assert.ok(ctx.res.headers["X-Correlation-Id"], "Expected X-Correlation-Id header");
   });
 
   it("returns 400 for missing eventType", async () => {
     const ctx = makeContext();
     await handler(ctx, { body: { foo: "bar" } });
     assert.equal(ctx.res.status, 400);
+    assert.ok(ctx.res.headers["X-Correlation-Id"], "Expected X-Correlation-Id header");
   });
 
   it("routes workitem.created to ticket analyzer", async () => {
@@ -78,6 +80,7 @@ describe("index.js router", () => {
     await handler(ctx, { body: { eventType: "workitem.created" } });
     assert.equal(ctx.res.status, 200);
     assert.deepEqual(ctx.res.body, { mock: "analyzeTicket" });
+    assert.ok(ctx.res.headers["X-Correlation-Id"], "Expected X-Correlation-Id header");
   });
 
   it("routes workitem.updated to time estimator", async () => {
@@ -113,5 +116,6 @@ describe("index.js router", () => {
     await handler(ctx, { body: { eventType: "workitem.created" } });
     assert.equal(ctx.res.status, 500);
     assert.ok(ctx.res.body.error);
+    assert.ok(ctx.res.headers["X-Correlation-Id"], "Expected X-Correlation-Id header on 500");
   });
 });

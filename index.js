@@ -9,6 +9,16 @@ const { generateReleaseNotes } = require("./functions/releaseNotesGenerator");
 validateEnv();
 
 /**
+ * Handler registry – maps Azure DevOps webhook eventType strings to handler functions.
+ * To add a new handler: import it above, then add an entry here. No switch editing needed.
+ */
+const handlers = {
+  "workitem.created": { fn: analyzeTicket, label: "Ticket Analyzer" },
+  "workitem.updated": { fn: estimateTime, label: "Time Estimator" },
+  "git.pullrequest.merged": { fn: generateReleaseNotes, label: "Release Notes Generator" },
+};
+
+/**
  * Wraps the Azure Function context with a correlation-ID prefix on every log call.
  * This makes it trivial to filter logs for a single request in production.
  *
@@ -48,6 +58,12 @@ module.exports = async function (context, req) {
 
   ctx.log("DevOps AI Bot – Webhook received.");
 
+  /** Standard response headers including correlation ID for tracing. */
+  const responseHeaders = {
+    "Content-Type": "application/json",
+    "X-Correlation-Id": correlationId,
+  };
+
   try {
     const body = req.body;
 
@@ -55,6 +71,7 @@ module.exports = async function (context, req) {
       ctx.log.warn("Request has no body or missing eventType.");
       context.res = {
         status: 400,
+        headers: responseHeaders,
         body: { error: "Invalid webhook payload. Missing eventType." },
       };
       return;
@@ -64,41 +81,19 @@ module.exports = async function (context, req) {
     ctx.log(`Event type: ${eventType}`);
 
     let result;
+    const handler = handlers[eventType];
 
-    switch (eventType) {
-      // ------------------------------------------------------------------
-      // A work item was created → analyse ticket quality
-      // ------------------------------------------------------------------
-      case "workitem.created":
-        ctx.log("Routing to Ticket Analyzer...");
-        result = await analyzeTicket(body, ctx);
-        break;
-
-      // ------------------------------------------------------------------
-      // A work item was updated → estimate duration / complexity
-      // ------------------------------------------------------------------
-      case "workitem.updated":
-        ctx.log("Routing to Time Estimator...");
-        result = await estimateTime(body, ctx);
-        break;
-
-      // ------------------------------------------------------------------
-      // A pull request was merged → generate release notes
-      // ------------------------------------------------------------------
-      case "git.pullrequest.merged":
-        ctx.log("Routing to Release Notes Generator...");
-        result = await generateReleaseNotes(body, ctx);
-        break;
-
-      default:
-        ctx.log(`Unhandled event type: ${eventType}. Acknowledging.`);
-        result = { message: `Event type "${eventType}" is not handled.` };
-        break;
+    if (handler) {
+      ctx.log(`Routing to ${handler.label}...`);
+      result = await handler.fn(body, ctx);
+    } else {
+      ctx.log(`Unhandled event type: ${eventType}. Acknowledging.`);
+      result = { message: `Event type "${eventType}" is not handled.` };
     }
 
     context.res = {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: responseHeaders,
       body: result,
     };
   } catch (error) {
@@ -107,6 +102,7 @@ module.exports = async function (context, req) {
 
     context.res = {
       status: 500,
+      headers: responseHeaders,
       body: {
         error: "Internal server error while processing webhook.",
       },
