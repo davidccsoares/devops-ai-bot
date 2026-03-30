@@ -37,11 +37,19 @@ devops-ai-bot/
 │   ├── analyzeTicketPrompt.js     # Prompt for ticket analysis
 │   ├── estimateTimePrompt.js      # Prompt for time estimation
 │   └── releaseNotesPrompt.js      # Prompt for release notes
+├── utils/
+│   ├── fetchWithRetry.js          # HTTP fetch with timeout + exponential backoff retry
+│   ├── handlerFactory.js          # Shared handler pattern (extract → AI → post)
+│   ├── htmlEscape.js              # HTML escaping for safe comment rendering
+│   └── validateEnv.js             # Startup env var validation
+├── tests/                         # Unit tests (Node.js built-in test runner)
 ├── devops-webhook/
 │   └── function.json              # Azure Function binding configuration
 ├── index.js                       # Main entry point & event router
 ├── host.json                      # Azure Functions host configuration
 ├── local.settings.json            # Local environment variables (do not commit)
+├── eslint.config.mjs              # ESLint configuration
+├── .prettierrc                    # Prettier configuration
 ├── package.json
 └── README.md
 ```
@@ -80,6 +88,13 @@ Edit `local.settings.json` (never commit this file):
 | `AI_API_KEY` | Your API key for the AI service |
 | `AI_MODEL` | Model identifier, e.g. `mistralai/mistral-7b-instruct:free` |
 
+Optional tuning variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `AI_TIMEOUT_MS` | `30000` | Timeout for AI API calls (ms) |
+| `DEVOPS_TIMEOUT_MS` | `15000` | Timeout for Azure DevOps API calls (ms) |
+
 ### 3. Run locally
 
 ```bash
@@ -89,6 +104,8 @@ func start
 The function will start at `http://localhost:7071/api/devops-webhook`.
 
 ### 4. Configure Azure DevOps Service Hooks
+
+> **Note:** Azure DevOps webhook integration is planned but not yet configured. The Function endpoint is ready to receive webhook payloads — see the section below for manual testing with `curl`.
 
 In your Azure DevOps project:
 
@@ -105,7 +122,41 @@ In your Azure DevOps project:
 
 ---
 
-## Testing Locally
+## Running Tests
+
+The project uses Node's built-in test runner (no external test framework needed):
+
+```bash
+npm test
+```
+
+This runs all `*.test.js` files under `tests/`. Current coverage includes:
+
+- **Router tests** — validates event routing, 400/500 responses, and error handling.
+- **Extractor tests** — validates webhook payload parsing for work items and PRs.
+- **fetchWithRetry tests** — validates timeout, retry, and backoff behaviour.
+
+---
+
+## Linting & Formatting
+
+```bash
+# Check for lint errors
+npm run lint
+
+# Auto-fix lint errors
+npm run lint:fix
+
+# Check formatting
+npm run format:check
+
+# Auto-format all files
+npm run format
+```
+
+---
+
+## Testing Locally with curl
 
 You can simulate webhook payloads with `curl`:
 
@@ -177,29 +228,29 @@ curl -X POST http://localhost:7071/api/devops-webhook \
 ## Deploying to Azure
 
 ```bash
-# Create the Function App (one-time)
+# Create the Function App (one-time) — replace placeholders with your values
 az functionapp create \
-  --resource-group myResourceGroup \
-  --consumption-plan-location westeurope \
+  --resource-group <your-resource-group> \
+  --consumption-plan-location <your-region> \
   --runtime node \
   --runtime-version 18 \
   --functions-version 4 \
-  --name devops-ai-bot \
-  --storage-account mystorageaccount
+  --name <your-function-app-name> \
+  --storage-account <your-storage-account>
 
 # Set environment variables
 az functionapp config appsettings set \
-  --name devops-ai-bot \
-  --resource-group myResourceGroup \
+  --name <your-function-app-name> \
+  --resource-group <your-resource-group> \
   --settings \
-    AZURE_DEVOPS_ORG="https://dev.azure.com/myorg" \
+    AZURE_DEVOPS_ORG="https://dev.azure.com/<your-org>" \
     AZURE_DEVOPS_PAT="<your-pat>" \
     AI_API_URL="https://openrouter.ai/api/v1/chat/completions" \
     AI_API_KEY="<your-key>" \
     AI_MODEL="mistralai/mistral-7b-instruct:free"
 
 # Deploy
-func azure functionapp publish devops-ai-bot
+func azure functionapp publish <your-function-app-name>
 ```
 
 ---
@@ -209,8 +260,21 @@ func azure functionapp publish devops-ai-bot
 To add a new handler:
 
 1. Create a new prompt file in `prompts/`.
-2. Create a new handler in `functions/`.
+2. Create a new handler in `functions/` using `createHandler()` from `utils/handlerFactory.js`.
 3. Add a new `case` in the `switch` block in `index.js`.
+
+---
+
+## Troubleshooting
+
+| Problem | Likely Cause | Fix |
+|---|---|---|
+| `Missing required environment variables` on startup | `local.settings.json` is missing or incomplete | Ensure all four required vars are set (see Setup step 2) |
+| AI returns raw text instead of JSON | Model doesn't follow JSON-only instruction | The parser handles this gracefully, but try a more capable model or add stricter prompting |
+| `401 Unauthorized` from Azure DevOps | PAT is expired or has insufficient permissions | Generate a new PAT with Work Items R/W + Code R/W |
+| Function times out (no response) | AI provider is slow or unresponsive | Increase `AI_TIMEOUT_MS` or switch to a faster model/provider |
+| `429 Too Many Requests` from AI API | Rate limit hit | Built-in retry with backoff handles this automatically (3 attempts). Consider upgrading your API plan |
+| Comment not posted to work item | Missing `System.TeamProject` in webhook payload | Ensure the webhook subscription includes project context |
 
 ---
 

@@ -1,12 +1,19 @@
-const fetch = require("node-fetch");
+const { fetchWithRetry } = require("../utils/fetchWithRetry");
 
 const AZURE_DEVOPS_ORG = process.env.AZURE_DEVOPS_ORG; // e.g. https://dev.azure.com/myorg
 const AZURE_DEVOPS_PAT = process.env.AZURE_DEVOPS_PAT;
 
+/** Default timeout for Azure DevOps API calls (15 seconds). */
+const DEVOPS_TIMEOUT_MS = parseInt(process.env.DEVOPS_TIMEOUT_MS, 10) || 15000;
+
 /**
  * Returns the Base-64-encoded authorisation header value for Azure DevOps.
+ * Throws early if the PAT is not configured.
  */
 function authHeader() {
+  if (!AZURE_DEVOPS_PAT) {
+    throw new Error("AZURE_DEVOPS_PAT environment variable is not set.");
+  }
   const token = Buffer.from(`:${AZURE_DEVOPS_PAT}`).toString("base64");
   return `Basic ${token}`;
 }
@@ -31,12 +38,10 @@ function extractWorkItemDataFromWebhook(payload) {
     description: fields["System.Description"] || "(no description)",
     workItemType: fields["System.WorkItemType"] || "Unknown",
     project:
-      (resource.fields && resource.fields["System.TeamProject"]) ||
-      (payload.resourceContainers &&
-        payload.resourceContainers.project &&
-        payload.resourceContainers.project.id) ||
+      fields["System.TeamProject"] ||
+      payload?.resourceContainers?.project?.id ||
       null,
-    url: resource.url || (resource._links && resource._links.html && resource._links.html.href) || null,
+    url: resource.url || resource?._links?.html?.href || null,
   };
 }
 
@@ -57,15 +62,13 @@ function extractPullRequestDataFromWebhook(payload) {
     repositoryName: repository.name || "Unknown",
     repositoryId: repository.id || null,
     project:
-      (repository.project && repository.project.name) ||
-      (payload.resourceContainers &&
-        payload.resourceContainers.project &&
-        payload.resourceContainers.project.id) ||
+      repository?.project?.name ||
+      payload?.resourceContainers?.project?.id ||
       null,
     sourceBranch: resource.sourceRefName || "",
     targetBranch: resource.targetRefName || "",
     linkedWorkItems: extractLinkedWorkItems(resource),
-    url: resource.url || (resource._links && resource._links.web && resource._links.web.href) || null,
+    url: resource.url || resource?._links?.web?.href || null,
   };
 }
 
@@ -73,19 +76,14 @@ function extractPullRequestDataFromWebhook(payload) {
  * Attempts to extract linked work-item references from a pull-request resource.
  */
 function extractLinkedWorkItems(resource) {
-  if (
-    resource.workItemRefs &&
-    Array.isArray(resource.workItemRefs)
-  ) {
-    return resource.workItemRefs.map(function (ref) {
-      return {
-        id: ref.id,
-        url: ref.url,
-      };
-    });
+  if (Array.isArray(resource.workItemRefs)) {
+    return resource.workItemRefs.map((ref) => ({
+      id: ref.id,
+      url: ref.url,
+    }));
   }
 
-  if (resource._links && resource._links.workItems) {
+  if (resource?._links?.workItems) {
     return [{ url: resource._links.workItems.href }];
   }
 
@@ -95,6 +93,16 @@ function extractLinkedWorkItems(resource) {
 // ---------------------------------------------------------------------------
 // Comment helpers
 // ---------------------------------------------------------------------------
+
+/** Shared retry options for Azure DevOps API calls. */
+function devopsRetryOpts(context) {
+  return {
+    maxRetries: 3,
+    timeoutMs: DEVOPS_TIMEOUT_MS,
+    baseDelayMs: 1000,
+    context,
+  };
+}
 
 /**
  * Posts a comment (HTML) to a work item.
@@ -115,31 +123,35 @@ async function postCommentToWorkItem(project, workItemId, commentHtml, context) 
   }
 
   const url =
-    AZURE_DEVOPS_ORG + "/" + encodeURIComponent(project) +
-    "/_apis/wit/workItems/" + workItemId + "/comments?api-version=7.1-preview.4";
+    `${AZURE_DEVOPS_ORG}/${encodeURIComponent(project)}` +
+    `/_apis/wit/workItems/${encodeURIComponent(workItemId)}/comments?api-version=7.1-preview.4`;
 
-  context.log("Posting comment to work item " + workItemId + " in project \"" + project + "\"...");
+  context.log(`Posting comment to work item ${workItemId} in project "${project}"...`);
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: authHeader(),
+  const response = await fetchWithRetry(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: authHeader(),
+      },
+      body: JSON.stringify({ text: commentHtml }),
     },
-    body: JSON.stringify({ text: commentHtml }),
-  });
+    devopsRetryOpts(context)
+  );
 
   if (!response.ok) {
     const errorBody = await response.text();
     context.log.error(
-      "Failed to post work-item comment (" + response.status + "): " + errorBody
+      `Failed to post work-item comment (${response.status}): ${errorBody}`
     );
     throw new Error(
-      "Azure DevOps API returned " + response.status + " when posting work-item comment."
+      `Azure DevOps API returned ${response.status} when posting work-item comment.`
     );
   }
 
-  context.log("Comment posted successfully to work item " + workItemId + ".");
+  context.log(`Comment posted successfully to work item ${workItemId}.`);
   return response.json();
 }
 
@@ -169,43 +181,45 @@ async function postCommentToPullRequest(
   }
 
   const url =
-    AZURE_DEVOPS_ORG + "/" + encodeURIComponent(project) +
-    "/_apis/git/repositories/" + repositoryId +
-    "/pullRequests/" + pullRequestId + "/threads?api-version=7.1-preview.1";
+    `${AZURE_DEVOPS_ORG}/${encodeURIComponent(project)}` +
+    `/_apis/git/repositories/${encodeURIComponent(repositoryId)}` +
+    `/pullRequests/${encodeURIComponent(pullRequestId)}/threads?api-version=7.1-preview.1`;
 
-  context.log(
-    "Posting comment to PR #" + pullRequestId + " in repo \"" + repositoryId + "\"..."
-  );
+  context.log(`Posting comment to PR #${pullRequestId} in repo "${repositoryId}"...`);
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: authHeader(),
+  const response = await fetchWithRetry(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: authHeader(),
+      },
+      body: JSON.stringify({
+        comments: [
+          {
+            parentCommentId: 0,
+            content: commentContent,
+            commentType: 1, // 1 = text
+          },
+        ],
+        status: 4, // 4 = closed (informational thread)
+      }),
     },
-    body: JSON.stringify({
-      comments: [
-        {
-          parentCommentId: 0,
-          content: commentContent,
-          commentType: 1,
-        },
-      ],
-      status: 4,
-    }),
-  });
+    devopsRetryOpts(context)
+  );
 
   if (!response.ok) {
     const errorBody = await response.text();
     context.log.error(
-      "Failed to post PR comment (" + response.status + "): " + errorBody
+      `Failed to post PR comment (${response.status}): ${errorBody}`
     );
     throw new Error(
-      "Azure DevOps API returned " + response.status + " when posting PR comment."
+      `Azure DevOps API returned ${response.status} when posting PR comment.`
     );
   }
 
-  context.log("Comment posted successfully to PR #" + pullRequestId + ".");
+  context.log(`Comment posted successfully to PR #${pullRequestId}.`);
   return response.json();
 }
 

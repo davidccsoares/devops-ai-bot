@@ -1,11 +1,16 @@
-const fetch = require("node-fetch");
+const { fetchWithRetry } = require("../utils/fetchWithRetry");
 
 const AI_API_URL = process.env.AI_API_URL;
 const AI_API_KEY = process.env.AI_API_KEY;
 const AI_MODEL = process.env.AI_MODEL || "mistralai/mistral-7b-instruct:free";
 
+/** Default timeout for AI API calls (30 seconds). */
+const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000;
+
 /**
  * Sends a prompt to the AI API and returns the parsed JSON response.
+ *
+ * Includes automatic retry with exponential backoff for transient failures.
  *
  * @param {string} systemPrompt - The system-level instruction for the AI.
  * @param {string} userMessage  - The user-level message containing data to analyse.
@@ -31,14 +36,23 @@ async function callAI(systemPrompt, userMessage, context) {
     max_tokens: 2048,
   };
 
-  const response = await fetch(AI_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${AI_API_KEY}`,
+  const response = await fetchWithRetry(
+    AI_API_URL,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${AI_API_KEY}`,
+      },
+      body: JSON.stringify(payload),
     },
-    body: JSON.stringify(payload),
-  });
+    {
+      maxRetries: 3,
+      timeoutMs: AI_TIMEOUT_MS,
+      baseDelayMs: 1000,
+      context,
+    }
+  );
 
   if (!response.ok) {
     const errorBody = await response.text();
@@ -49,10 +63,7 @@ async function callAI(systemPrompt, userMessage, context) {
   const data = await response.json();
 
   const rawContent =
-    data.choices &&
-    data.choices[0] &&
-    data.choices[0].message &&
-    data.choices[0].message.content;
+    data?.choices?.[0]?.message?.content;
 
   if (!rawContent) {
     throw new Error("AI response did not contain any content.");
