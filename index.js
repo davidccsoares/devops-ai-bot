@@ -1,11 +1,18 @@
 const crypto = require("node:crypto");
 const { validateEnv } = require("./utils/validateEnv");
+const { verifyWebhookSignature } = require("./utils/verifySignature");
+const { DedupCache } = require("./utils/dedupCache");
+const { validatePayload } = require("./utils/validatePayload");
 const { analyzeTicket } = require("./functions/ticketAnalyzer");
 const { estimateTime } = require("./functions/timeEstimator");
 
 // Validate env vars once at cold-start, not on every request.
 // In Azure Functions, this runs when the host loads the module.
 validateEnv();
+
+/** In-memory deduplication cache to skip duplicate webhook deliveries. */
+const dedupTtlMs = parseInt(process.env.DEDUP_TTL_MS, 10) || undefined;
+const dedupCache = new DedupCache(dedupTtlMs);
 
 /**
  * Handler registry – maps Azure DevOps webhook eventType strings to handler functions.
@@ -75,6 +82,7 @@ module.exports = async function (context, req) {
   const correlationId = crypto.randomUUID();
   const ctx = withCorrelationId(context, correlationId);
 
+  const startTime = Date.now();
   ctx.log("DevOps AI Bot – Webhook received.");
 
   /** Standard response headers including correlation ID for tracing. */
@@ -84,6 +92,18 @@ module.exports = async function (context, req) {
   };
 
   try {
+    // Optional HMAC signature validation (if WEBHOOK_SECRET is configured).
+    const sigResult = verifyWebhookSignature(req, process.env.WEBHOOK_SECRET);
+    if (!sigResult.valid) {
+      ctx.log.warn(`Webhook signature validation failed: ${sigResult.reason}`);
+      context.res = {
+        status: 401,
+        headers: responseHeaders,
+        body: { error: `Unauthorized: ${sigResult.reason}` },
+      };
+      return;
+    }
+
     const body = req.body;
 
     if (!body || !body.eventType) {
@@ -99,8 +119,35 @@ module.exports = async function (context, req) {
     const eventType = body.eventType;
     ctx.log(`Event type: ${eventType}`);
 
-    let result;
+    // Validate payload structure for known event types.
     const handler = handlers[eventType];
+    if (handler) {
+      const payloadCheck = validatePayload(body, eventType);
+      if (!payloadCheck.valid) {
+        ctx.log.warn(`Payload validation failed: ${payloadCheck.reason}`);
+        context.res = {
+          status: 400,
+          headers: responseHeaders,
+          body: { error: `Invalid payload: ${payloadCheck.reason}` },
+        };
+        return;
+      }
+    }
+
+    // Deduplicate: skip if we recently processed the same event for the same resource.
+    const resourceId = body?.resource?.id || body?.resource?.workItemId || "";
+    const dedupKey = `${eventType}:${resourceId}`;
+    if (dedupCache.has(dedupKey)) {
+      ctx.log(`Duplicate event detected (${dedupKey}). Skipping.`);
+      context.res = {
+        status: 200,
+        headers: responseHeaders,
+        body: { message: "Duplicate event skipped." },
+      };
+      return;
+    }
+
+    let result;
 
     if (handler) {
       // If the handler has a shouldHandle predicate, check it first.
@@ -115,6 +162,9 @@ module.exports = async function (context, req) {
       ctx.log(`Unhandled event type: ${eventType}. Acknowledging.`);
       result = { message: `Event type "${eventType}" is not handled.` };
     }
+
+    // Mark this event as processed for deduplication.
+    dedupCache.add(dedupKey);
 
     context.res = {
       status: 200,
@@ -132,5 +182,8 @@ module.exports = async function (context, req) {
         error: "Internal server error while processing webhook.",
       },
     };
+  } finally {
+    const durationMs = Date.now() - startTime;
+    ctx.log(`Request completed in ${durationMs}ms (status ${context.res?.status || "unknown"}).`);
   }
 };

@@ -206,6 +206,34 @@ describe("callAI", () => {
     assert.deepEqual(capturedBody.response_format, { type: "json_object" });
   });
 
+  it("returns truncated rawResponse when response exceeds size limit", async () => {
+    process.env.AI_MAX_RESPONSE_SIZE = "50"; // Very small limit for testing
+
+    delete require.cache[require.resolve("../../services/aiService")];
+    delete require.cache[require.resolve("../../utils/fetchWithRetry")];
+    ({ callAI } = require("../../services/aiService"));
+
+    const longContent = "a".repeat(100); // Exceeds 50-char limit
+
+    global.fetch = async () =>
+      mockFetchResponse({
+        choices: [{ message: { content: longContent } }],
+      });
+
+    const ctx = mockContext();
+    const result = await callAI("system", "user", ctx);
+
+    // Should return a rawResponse (not parsed JSON)
+    assert.ok(result.rawResponse, "Expected rawResponse key in result");
+    assert.ok(
+      result.rawResponse.includes("… [truncated]"),
+      "Expected truncation marker"
+    );
+    assert.ok(result.rawResponse.length < longContent.length);
+    // Should have logged a warning
+    assert.ok(ctx.logs.some(([level]) => level === "warn"));
+  });
+
   it("uses default model when AI_MODEL is not set", async () => {
     delete process.env.AI_MODEL;
 

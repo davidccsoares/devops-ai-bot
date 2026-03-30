@@ -163,7 +163,7 @@ describe("createHandler (handlerFactory)", () => {
     assert.equal(capturedComment, "<b>AI says hi</b>");
   });
 
-  it("propagates errors from postComment", async () => {
+  it("tolerates postComment errors and still returns result", async () => {
     global.fetch = async () => ({
       ok: true,
       status: 200,
@@ -174,7 +174,7 @@ describe("createHandler (handlerFactory)", () => {
 
     const handler = createHandler({
       name: "ErrorTest",
-      extract: () => ({}),
+      extract: () => ({ id: 99 }),
       logExtracted: () => {},
       promptModule: {
         getSystemPrompt: () => "sys",
@@ -184,13 +184,22 @@ describe("createHandler (handlerFactory)", () => {
       postComment: async () => {
         throw new Error("DevOps API failed");
       },
-      buildResult: () => ({}),
+      buildResult: (data, aiResult) => ({ id: data.id, aiResult }),
     });
 
     const ctx = mockContext();
-    await assert.rejects(() => handler({}, ctx), {
-      message: /DevOps API failed/,
-    });
+    // Should NOT throw — the error is caught and logged
+    const result = await handler({}, ctx);
+
+    // Result should still be returned
+    assert.equal(result.id, 99);
+    assert.deepEqual(result.aiResult, { ok: true });
+
+    // An error should have been logged
+    assert.ok(
+      ctx.logs.some(([level]) => level === "error"),
+      "Expected an error log for the postComment failure"
+    );
   });
 
   it("logs handler name at start", async () => {

@@ -59,8 +59,9 @@ function extractWorkItemDataFromWebhook(payload) {
 /** Shared retry options for Azure DevOps API calls. */
 function devopsRetryOpts(context) {
   const timeoutMs = parseInt(process.env.DEVOPS_TIMEOUT_MS, 10) || 30000;
+  const maxRetries = parseInt(process.env.DEVOPS_MAX_RETRIES, 10) || 3;
   return {
-    maxRetries: 3,
+    maxRetries,
     timeoutMs,
     baseDelayMs: 1000,
     context,

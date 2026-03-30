@@ -15,6 +15,8 @@ async function callAI(systemPrompt, userMessage, context) {
   const AI_API_KEY = process.env.AI_API_KEY;
   const AI_MODEL = process.env.AI_MODEL || "mistralai/mistral-7b-instruct:free";
   const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000;
+  const AI_MAX_RETRIES = parseInt(process.env.AI_MAX_RETRIES, 10) || 3;
+  const AI_MAX_RESPONSE_SIZE = parseInt(process.env.AI_MAX_RESPONSE_SIZE, 10) || 102400; // 100KB
 
   if (!AI_API_URL || !AI_API_KEY) {
     throw new Error(
@@ -46,7 +48,7 @@ async function callAI(systemPrompt, userMessage, context) {
       body: JSON.stringify(payload),
     },
     {
-      maxRetries: 3,
+      maxRetries: AI_MAX_RETRIES,
       timeoutMs: AI_TIMEOUT_MS,
       baseDelayMs: 1000,
       context,
@@ -61,11 +63,32 @@ async function callAI(systemPrompt, userMessage, context) {
 
   const data = await response.json();
 
+  // Log token usage if the AI API provides it (OpenAI-compatible format).
+  const usage = data?.usage;
+  if (usage) {
+    context.log(
+      `AI token usage — prompt: ${usage.prompt_tokens ?? "?"}, ` +
+      `completion: ${usage.completion_tokens ?? "?"}, ` +
+      `total: ${usage.total_tokens ?? "?"}`
+    );
+  }
+
   const rawContent =
     data?.choices?.[0]?.message?.content;
 
   if (!rawContent) {
     throw new Error("AI response did not contain any content.");
+  }
+
+  // Guard: reject responses that exceed the configured size limit.
+  if (rawContent.length > AI_MAX_RESPONSE_SIZE) {
+    context.log.warn(
+      `AI response size (${rawContent.length} chars) exceeds limit (${AI_MAX_RESPONSE_SIZE}). ` +
+      "Returning truncated raw response."
+    );
+    return {
+      rawResponse: rawContent.slice(0, AI_MAX_RESPONSE_SIZE) + "… [truncated]",
+    };
   }
 
   context.log("AI response received. Parsing JSON...");

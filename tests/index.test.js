@@ -50,6 +50,7 @@ describe("index.js router", () => {
     delete require.cache[require.resolve("../index")];
     delete require.cache[require.resolve("../functions/ticketAnalyzer")];
     delete require.cache[require.resolve("../functions/timeEstimator")];
+    delete process.env.WEBHOOK_SECRET;
   });
 
   it("returns 400 for missing body", async () => {
@@ -69,7 +70,12 @@ describe("index.js router", () => {
 
   it("routes workitem.created to ticket analyzer", async () => {
     const ctx = makeContext();
-    await handler(ctx, { body: { eventType: "workitem.created" } });
+    await handler(ctx, {
+      body: {
+        eventType: "workitem.created",
+        resource: { id: 1, fields: { "System.Title": "Test" } },
+      },
+    });
     assert.equal(ctx.res.status, 200);
     assert.deepEqual(ctx.res.body, { mock: "analyzeTicket" });
     assert.ok(ctx.res.headers["X-Correlation-Id"], "Expected X-Correlation-Id header");
@@ -77,8 +83,13 @@ describe("index.js router", () => {
 
   it("routes workitem.updated to time estimator", async () => {
     const ctx = makeContext();
-    // No resource.fields → can't determine, should process anyway
-    await handler(ctx, { body: { eventType: "workitem.updated" } });
+    // Has resource.id but no resource.fields → can't determine relevance, should process anyway
+    await handler(ctx, {
+      body: {
+        eventType: "workitem.updated",
+        resource: { id: 42 },
+      },
+    });
     assert.equal(ctx.res.status, 200);
     assert.deepEqual(ctx.res.body, { mock: "estimateTime" });
   });
@@ -89,6 +100,7 @@ describe("index.js router", () => {
       body: {
         eventType: "workitem.updated",
         resource: {
+          id: 42,
           fields: {
             "System.Title": { oldValue: "Old title", newValue: "New title" },
           },
@@ -105,6 +117,7 @@ describe("index.js router", () => {
       body: {
         eventType: "workitem.updated",
         resource: {
+          id: 42,
           fields: {
             "System.State": { oldValue: "New", newValue: "Active" },
             "System.AssignedTo": { oldValue: "", newValue: "john@example.com" },
@@ -132,9 +145,41 @@ describe("index.js router", () => {
     handler = require("../index");
 
     const ctx = makeContext();
-    await handler(ctx, { body: { eventType: "workitem.created" } });
+    await handler(ctx, {
+      body: {
+        eventType: "workitem.created",
+        resource: { id: 1 },
+      },
+    });
     assert.equal(ctx.res.status, 500);
     assert.ok(ctx.res.body.error);
     assert.ok(ctx.res.headers["X-Correlation-Id"], "Expected X-Correlation-Id header on 500");
+  });
+
+  it("returns 400 when workitem payload has no resource", async () => {
+    const ctx = makeContext();
+    await handler(ctx, { body: { eventType: "workitem.created" } });
+    assert.equal(ctx.res.status, 400);
+    assert.ok(ctx.res.body.error.includes("resource"));
+  });
+
+  it("returns 400 when workitem payload has no resource id", async () => {
+    const ctx = makeContext();
+    await handler(ctx, {
+      body: { eventType: "workitem.created", resource: { fields: {} } },
+    });
+    assert.equal(ctx.res.status, 400);
+    assert.ok(ctx.res.body.error.includes("id"));
+  });
+
+  it("returns 401 when WEBHOOK_SECRET is set but signature is missing", async () => {
+    process.env.WEBHOOK_SECRET = "my-secret";
+    delete require.cache[require.resolve("../index")];
+    handler = require("../index");
+
+    const ctx = makeContext();
+    await handler(ctx, { headers: {}, body: { eventType: "workitem.created" } });
+    assert.equal(ctx.res.status, 401);
+    assert.ok(ctx.res.body.error.includes("Unauthorized"));
   });
 });

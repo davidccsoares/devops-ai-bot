@@ -62,7 +62,15 @@ function createHandler(config) {
       comment = formatComment(aiResult);
     }
 
-    await postComment(data, comment, context);
+    // Post the comment but tolerate failures — the AI analysis is still valuable
+    // even if we can't post it back to Azure DevOps.
+    try {
+      await postComment(data, comment, context);
+    } catch (postErr) {
+      context.log.error(
+        `${name} - Failed to post comment: ${postErr.message}. Continuing with result.`
+      );
+    }
 
     return buildResult(data, aiResult);
   };

@@ -1,4 +1,5 @@
 const { validateEnv } = require("./utils/validateEnv");
+const { version } = require("./package.json");
 
 /**
  * Lightweight health-check endpoint.
@@ -35,6 +36,7 @@ module.exports = async function (context) {
     headers: { "Content-Type": "application/json" },
     body: {
       status: "healthy",
+      version,
       uptime,
       timestamp: new Date().toISOString(),
     },

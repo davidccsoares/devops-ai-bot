@@ -42,6 +42,7 @@ describe("healthCheck", () => {
     assert.equal(ctx.res.body.status, "healthy");
     assert.ok(ctx.res.body.uptime >= 0, "Expected uptime to be a number");
     assert.ok(ctx.res.body.timestamp, "Expected a timestamp");
+    assert.ok(ctx.res.body.version, "Expected a version string");
   });
 
   it("returns 503 when a required env var is missing", async () => {
