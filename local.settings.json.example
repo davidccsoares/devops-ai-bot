@@ -20,6 +20,15 @@
     "WEBHOOK_SECRET": "",
     "DEDUP_TTL_MS": "300000",
     "RATE_LIMIT_MAX": "60",
-    "RATE_LIMIT_WINDOW_MS": "60000"
+    "RATE_LIMIT_WINDOW_MS": "60000",
+
+    "AI_MODEL_REVIEW": "mistralai/mistral-small-3.1-24b-instruct:free",
+    "AI_MODEL_CHEAP": "meta-llama/llama-3.2-3b-instruct:free",
+
+    "PLAYWRIGHT_REPO_NAME": "BindTuning.AdminApp",
+    "PLAYWRIGHT_TARGET_BRANCH": "refs/heads/Dev",
+    "PLAYWRIGHT_TEST_BRANCH": "internship/playwright-unit-tests",
+    "PIPELINE_ID": "88",
+    "AZURE_PROJECT": "BindTuning"
   }
 }

@@ -1,34 +1,48 @@
 # DevOps AI Bot
 
-An AI-powered Azure Function that integrates with Azure DevOps webhooks to automatically **analyse tickets** and **estimate effort**.
+An AI-powered Azure Functions app that integrates with Azure DevOps to automatically **analyse tickets**, **estimate effort**, **review pull requests**, **generate Playwright tests**, and **track flaky tests**.
 
 ---
 
 ## Architecture
 
 ```
-Azure DevOps  ->  Service Hooks (webhook)  ->  Azure Function (HTTP trigger)  ->  AI API
-                                                     |
-                                           Posts comment back to Azure DevOps
+Azure DevOps  ─>  Service Hooks (webhooks)  ─>  Azure Functions (HTTP triggers)  ─>  AI API (OpenRouter)
+                                                       │
+                                             Posts comments back to Azure DevOps
+                                             (work items, PR threads, labels, git pushes)
 ```
 
-A single HTTP endpoint receives all webhook events and routes them to the correct handler based on the `eventType` field.
+### Endpoints
 
-| Event type | Handler | Action |
-|---|---|---|
-| `workitem.created` | Ticket Analyzer | Analyses quality, scores 1-10, suggests improvements |
-| `workitem.updated` | Time Estimator | Estimates complexity, duration, and risk |
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|---------|
+| `/api/devops-webhook` | POST | function key | Work item webhooks (ticket analysis + time estimation) |
+| `/api/pr-review-gateway` | POST | function key | PR webhooks (AI code review + Playwright test gen) |
+| `/api/flaky-detective/{action?}` | GET/POST | function key | Flaky test tracking + HTML dashboard |
+| `/api/pw-test` | GET | function key | Manual Playwright test generation trigger |
+| `/api/health` | GET | anonymous | Health check |
+
+### Features
+
+| Feature | Trigger | What It Does |
+|---------|---------|-------------|
+| **Ticket Analyzer** | `workitem.created` | AI grades ticket quality (1-10), identifies missing info, suggests improvements |
+| **Time Estimator** | `workitem.updated` (Title/Description change) | AI estimates complexity, time range, risk level |
+| **PR Code Review** | `git.pullrequest.created/updated` | AI reviews code diffs, detects secrets, scores risk, auto-labels PR |
+| **Playwright Test Gen** | PR created on AdminApp targeting Dev | AI generates E2E tests, pushes to test branch, triggers pipeline |
+| **Flaky Detective** | Build completed (pipeline) | Tracks flaky tests over 14-day window, HTML/JSON dashboard |
 
 ### Security & Resilience
 
-- **HMAC-SHA256 webhook verification** – optional signature validation via `WEBHOOK_SECRET`
-- **Rate limiting** – in-memory sliding-window limiter protects against request floods
-- **Deduplication** – in-memory TTL cache prevents processing duplicate webhook deliveries
-- **Payload validation** – rejects malformed payloads with clear 400 errors
-- **Graceful degradation** – when the AI API is unreachable, posts a "temporarily unavailable" comment instead of failing
-- **Error-tolerant comment posting** – comment post failures are logged but don't prevent the result from being returned
-- **Prompt injection mitigation** – user data is delimited and truncated before being sent to the AI
-- **AI response validation** – coerces AI output to expected types with safe defaults
+- **HMAC-SHA256 webhook verification** via optional `WEBHOOK_SECRET`
+- **Rate limiting** — sliding-window per endpoint
+- **Deduplication** — TTL cache prevents duplicate webhook processing
+- **Payload validation** — rejects malformed payloads with clear 400 errors
+- **Graceful degradation** — AI outage posts "temporarily unavailable" comment
+- **Prompt injection mitigation** — user data delimited and truncated
+- **AI response validation** — coerces output to expected types with safe defaults
+- **Secret detection** — scans PR diffs for accidentally committed credentials
 
 ---
 
@@ -37,39 +51,52 @@ A single HTTP endpoint receives all webhook events and routes them to the correc
 ```
 devops-ai-bot/
 ├── functions/
-│   ├── ticketAnalyzer.js          # Feature 1 - AI ticket analysis
-│   └── timeEstimator.js           # Feature 2 - AI time estimation
+│   ├── ticketAnalyzer.js          # AI ticket quality analysis
+│   ├── timeEstimator.js           # AI effort estimation
+│   ├── prGateway.js               # PR webhook orchestration + file classification
+│   ├── prReviewer.js              # AI code review + risk scoring
+│   ├── playwrightContext.js       # Gathers Angular context for test generation
+│   ├── playwrightGenerate.js      # AI Playwright test generation
+│   ├── playwrightPush.js          # Pushes tests to git + triggers pipeline
+│   └── flakyDetective.js          # Flaky test tracking + HTML dashboard
 ├── services/
-│   ├── aiService.js               # Calls the AI API, parses JSON responses
-│   └── azureDevopsService.js      # Azure DevOps REST API helpers
+│   ├── aiService.js               # AI API client (JSON + raw modes)
+│   └── azureDevopsService.js      # Azure DevOps work item API helpers
+├── lib/
+│   ├── azurePr.js                 # Azure DevOps PR/Git API helpers
+│   ├── prComments.js              # PR thread comment posting
+│   ├── diffs.js                   # Myers diff algorithm + diff formatting
+│   ├── secrets.js                 # Secret/credential detection in diffs
+│   ├── prompts.js                 # AI prompt construction for PR review
+│   ├── constants.js               # Shared constants (API versions, batch size)
+│   └── kvStore.js                 # In-memory KV store with TTL (replaces CF KV)
 ├── prompts/
-│   ├── analyzeTicketPrompt.js     # Prompt for ticket analysis
-│   └── estimateTimePrompt.js      # Prompt for time estimation
+│   ├── analyzeTicketPrompt.js     # System + user prompts for ticket analysis
+│   └── estimateTimePrompt.js      # System + user prompts for time estimation
 ├── utils/
-│   ├── capitalize.js              # Shared string capitalize utility
-│   ├── dedupCache.js              # In-memory dedup cache with TTL + periodic pruning
-│   ├── fetchWithRetry.js          # HTTP fetch with timeout + exponential backoff retry
+│   ├── capitalize.js              # String capitalize
+│   ├── dedupCache.js              # Dedup cache with TTL + periodic pruning
+│   ├── fetchWithRetry.js          # HTTP fetch with timeout + exponential backoff
 │   ├── handlerFactory.js          # Shared handler pattern (extract → AI → post)
-│   ├── htmlEscape.js              # HTML escaping for safe comment rendering
+│   ├── htmlEscape.js              # HTML escaping for XSS prevention
 │   ├── rateLimiter.js             # Sliding-window rate limiter
-│   ├── sanitizeInput.js           # Prompt injection mitigation (input delimiting + truncation)
-│   ├── structuredLog.js           # Structured JSON logging for Application Insights
-│   ├── validateAIResponse.js      # AI response schema validation (coerce with safe defaults)
+│   ├── sanitizeInput.js           # Prompt injection mitigation
+│   ├── structuredLog.js           # Structured JSON logging
+│   ├── validateAIResponse.js      # AI response coercion (number, enum, string, array)
 │   ├── validateEnv.js             # Startup env var validation
 │   ├── validatePayload.js         # Webhook payload structure validation
-│   └── verifySignature.js         # HMAC-SHA256 webhook signature verification
-├── tests/                         # Unit & integration tests (Node.js built-in test runner)
-├── devops-webhook/
-│   └── function.json              # Azure Function binding (POST /api/devops-webhook)
-├── health/
-│   └── function.json              # Azure Function binding (GET /api/health)
+│   └── verifySignature.js         # HMAC-SHA256 signature verification
+├── tests/                         # Unit, integration, and simulation tests
+├── devops-webhook/function.json   # POST /api/devops-webhook
+├── pr-review-gateway/             # POST /api/pr-review-gateway
+├── flaky-detective/               # GET/POST /api/flaky-detective/{action?}
+├── pw-test/                       # GET /api/pw-test
+├── health/function.json           # GET /api/health
 ├── index.js                       # Main entry point & event router
-├── healthCheck.js                 # Health-check endpoint handler
-├── host.json                      # Azure Functions host configuration
-├── local.settings.json.example    # Template for local environment variables
-├── eslint.config.mjs              # ESLint flat configuration
-├── .prettierrc                    # Prettier configuration
-├── package.json
+├── healthCheck.js                 # Health-check endpoint
+├── host.json                      # Azure Functions host config
+├── local.settings.json.example    # Template for local env vars
+├── WEBHOOK-SETUP-GUIDE.md         # Step-by-step webhook configuration guide
 └── README.md
 ```
 
@@ -79,9 +106,11 @@ devops-ai-bot/
 
 - **Node.js** >= 18
 - **Azure Functions Core Tools** v4 (`npm i -g azure-functions-core-tools@4`)
-- An **Azure DevOps** organisation with a Personal Access Token (PAT) that has:
+- An **Azure DevOps** organisation with a PAT that has:
   - Work Items: Read & Write
-- An **AI API key** - the project defaults to [OpenRouter](https://openrouter.ai) with a free model, but any OpenAI-compatible API works.
+  - Code: Read & Write
+  - Build: Read
+- An **AI API key** — defaults to [OpenRouter](https://openrouter.ai) free models, but any OpenAI-compatible API works
 
 ---
 
@@ -96,31 +125,41 @@ npm install
 
 ### 2. Configure environment variables
 
-Edit `local.settings.json` (never commit this file). See `local.settings.json.example` for a template.
+Copy the example file and fill in your values:
+
+```bash
+cp local.settings.json.example local.settings.json
+```
+
+Never commit `local.settings.json` (it's in `.gitignore`).
 
 #### Required variables
 
 | Variable | Description |
-|---|---|
-| `AZURE_DEVOPS_ORG` | Your organisation URL, e.g. `https://dev.azure.com/myorg` |
+|----------|-------------|
+| `AZURE_DEVOPS_ORG` | Organisation URL, e.g. `https://dev.azure.com/myorg` |
 | `AZURE_DEVOPS_PAT` | Personal Access Token |
-| `AI_API_URL` | AI chat completions endpoint, e.g. `https://openrouter.ai/api/v1/chat/completions` |
-| `AI_API_KEY` | Your API key for the AI service |
-| `AI_MODEL` | Model identifier, e.g. `mistralai/mistral-7b-instruct:free` |
+| `AI_API_URL` | AI chat completions endpoint |
+| `AI_API_KEY` | API key for the AI service |
 
-#### Optional tuning variables
+#### Optional variables
 
 | Variable | Default | Description |
-|---|---|---|
-| `AI_TIMEOUT_MS` | `30000` | Timeout for AI API calls (ms) |
-| `AI_MAX_RETRIES` | `3` | Maximum retry attempts for AI API calls |
-| `AI_MAX_RESPONSE_SIZE` | `102400` | Maximum AI response size in characters (100KB) |
-| `DEVOPS_TIMEOUT_MS` | `30000` | Timeout for Azure DevOps API calls (ms) |
-| `DEVOPS_MAX_RETRIES` | `3` | Maximum retry attempts for Azure DevOps API calls |
-| `WEBHOOK_SECRET` | _(empty)_ | HMAC-SHA256 secret for webhook signature verification (leave empty to skip) |
-| `DEDUP_TTL_MS` | `300000` | Deduplication cache TTL (5 minutes) |
-| `RATE_LIMIT_MAX` | `60` | Maximum requests per rate-limit window |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit sliding window size (1 minute) |
+|----------|---------|-------------|
+| `AI_MODEL` | `mistralai/mistral-7b-instruct:free` | Model for ticket/time analysis (JSON mode) |
+| `AI_MODEL_REVIEW` | (same as AI_MODEL) | Model for PR code review |
+| `AI_MODEL_CHEAP` | (same as AI_MODEL) | Model for PR summaries |
+| `AZURE_PROJECT` | `BindTuning` | Default Azure DevOps project name |
+| `PLAYWRIGHT_REPO_NAME` | `BindTuning.AdminApp` | Repo to enable Playwright test gen |
+| `PLAYWRIGHT_TARGET_BRANCH` | `refs/heads/Dev` | Target branch that triggers test gen |
+| `PLAYWRIGHT_TEST_BRANCH` | `internship/playwright-unit-tests` | Branch to push generated tests to |
+| `PIPELINE_ID` | `88` | Pipeline to trigger after pushing tests |
+| `WEBHOOK_SECRET` | _(empty)_ | HMAC secret for signature verification |
+| `AI_TIMEOUT_MS` | `30000` | AI API call timeout (ms) |
+| `AI_MAX_RETRIES` | `3` | AI API retry attempts |
+| `DEDUP_TTL_MS` | `300000` | Dedup cache TTL (5 min) |
+| `RATE_LIMIT_MAX` | `60` | Max requests per rate-limit window |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window (1 min) |
 
 ### 3. Run locally
 
@@ -128,49 +167,29 @@ Edit `local.settings.json` (never commit this file). See `local.settings.json.ex
 func start
 ```
 
-The function will start at `http://localhost:7071/api/devops-webhook`.
+Endpoints:
+- `http://localhost:7071/api/health`
+- `http://localhost:7071/api/devops-webhook`
+- `http://localhost:7071/api/pr-review-gateway`
+- `http://localhost:7071/api/flaky-detective`
+- `http://localhost:7071/api/pw-test`
 
-The health endpoint is available at `http://localhost:7071/api/health` (returns version, uptime, and config status).
+### 4. Configure webhooks
 
-### 4. Configure Azure DevOps Service Hooks
-
-In your Azure DevOps project:
-
-1. Go to **Project Settings > Service Hooks**.
-2. Click **+ Create subscription**.
-3. Choose **Web Hooks** as the service.
-4. Create two subscriptions:
-
-| Trigger | Filter | URL |
-|---|---|---|
-| Work item created | (any or specific type) | `https://<your-function-app>.azurewebsites.net/api/devops-webhook?code=<function-key>` |
-| Work item updated | (any or specific type) | Same URL |
+See **[WEBHOOK-SETUP-GUIDE.md](./WEBHOOK-SETUP-GUIDE.md)** for complete step-by-step instructions.
 
 ---
 
 ## Running Tests
 
-The project uses Node's built-in test runner (no external test framework needed):
-
 ```bash
+# Run all tests (158 tests across 23 suites)
 npm test
-```
 
-This runs all `*.test.js` files under `tests/`. Current coverage includes **158 tests across 23 suites**:
+# Run webhook simulations (31 integration scenarios)
+node tests/simulate-webhooks.js
 
-- **Integration tests** — end-to-end flow from webhook receipt through AI call to DevOps comment posting.
-- **Router tests** — validates event routing, field-change filtering, payload validation, rate limiting, dedup, signature verification, and error handling.
-- **Health check tests** — validates 200/503 responses, version info, and timestamps.
-- **AI service tests** — validates `callAI` (env validation, HTTP errors, payload structure, default model, response size guard, AI timing) and `parseAIResponse` (JSON, code fences, raw fallback).
-- **Format comment tests** — validates HTML output for both handlers (ticket, time) including XSS prevention and edge cases.
-- **Extractor tests** — validates webhook payload parsing for work items.
-- **fetchWithRetry tests** — validates timeout, retry, backoff, jitter, and Retry-After behaviour.
-- **Handler factory tests** — validates lifecycle ordering, result building, graceful degradation, error tolerance, and raw response fallback.
-- **Utility tests** — validates `escapeHtml`, `capitalize`, `validateEnv`, `sanitizeInput`, `structuredLog`, `rateLimiter`, `dedupCache`, `validatePayload`, `verifySignature`, and all `coerce*` functions.
-
-### Lint + Test combined
-
-```bash
+# Lint + test combined
 npm run check
 ```
 
@@ -179,67 +198,10 @@ npm run check
 ## Linting & Formatting
 
 ```bash
-# Check for lint errors
-npm run lint
-
-# Auto-fix lint errors
-npm run lint:fix
-
-# Check formatting
-npm run format:check
-
-# Auto-format all files
-npm run format
-```
-
----
-
-## Testing Locally with curl
-
-You can simulate webhook payloads with `curl`:
-
-### Test: work item created
-
-```bash
-curl -X POST http://localhost:7071/api/devops-webhook \
-  -H "Content-Type: application/json" \
-  -d '{
-    "eventType": "workitem.created",
-    "resource": {
-      "id": 42,
-      "fields": {
-        "System.Title": "Add user authentication",
-        "System.Description": "Implement OAuth2 login with Google and GitHub providers.",
-        "System.WorkItemType": "User Story",
-        "System.TeamProject": "MyProject"
-      }
-    }
-  }'
-```
-
-### Test: work item updated
-
-```bash
-curl -X POST http://localhost:7071/api/devops-webhook \
-  -H "Content-Type: application/json" \
-  -d '{
-    "eventType": "workitem.updated",
-    "resource": {
-      "id": 42,
-      "fields": {
-        "System.Title": "Add user authentication",
-        "System.Description": "Implement OAuth2 login with Google and GitHub providers. Must support MFA.",
-        "System.WorkItemType": "User Story",
-        "System.TeamProject": "MyProject"
-      }
-    }
-  }'
-```
-
-### Test: health check
-
-```bash
-curl http://localhost:7071/api/health
+npm run lint          # Check for lint errors
+npm run lint:fix      # Auto-fix lint errors
+npm run format:check  # Check formatting
+npm run format        # Auto-format all files
 ```
 
 ---
@@ -247,15 +209,8 @@ curl http://localhost:7071/api/health
 ## Deploying to Azure
 
 ```bash
-# Create the Function App (one-time) — replace placeholders with your values
-az functionapp create \
-  --resource-group <your-resource-group> \
-  --consumption-plan-location <your-region> \
-  --runtime node \
-  --runtime-version 18 \
-  --functions-version 4 \
-  --name <your-function-app-name> \
-  --storage-account <your-storage-account>
+# Deploy
+func azure functionapp publish <your-function-app-name>
 
 # Set environment variables
 az functionapp config appsettings set \
@@ -265,38 +220,24 @@ az functionapp config appsettings set \
     AZURE_DEVOPS_ORG="https://dev.azure.com/<your-org>" \
     AZURE_DEVOPS_PAT="<your-pat>" \
     AI_API_URL="https://openrouter.ai/api/v1/chat/completions" \
-    AI_API_KEY="<your-key>" \
-    AI_MODEL="mistralai/mistral-7b-instruct:free"
-
-# Deploy
-func azure functionapp publish <your-function-app-name>
+    AI_API_KEY="<your-key>"
 ```
-
----
-
-## Extending the Bot
-
-To add a new handler:
-
-1. Create a new prompt file in `prompts/`.
-2. Create a new handler in `functions/` using `createHandler()` from `utils/handlerFactory.js`.
-3. Add a new entry in the `handlers` registry in `index.js`.
 
 ---
 
 ## Troubleshooting
 
 | Problem | Likely Cause | Fix |
-|---|---|---|
-| `Missing required environment variables` on startup | `local.settings.json` is missing or incomplete | Ensure all four required vars are set (see Setup step 2) |
-| AI returns raw text instead of JSON | Model doesn't follow JSON-only instruction | The parser handles this gracefully, but try a more capable model or add stricter prompting |
-| `401 Unauthorized` from Azure DevOps | PAT is expired or has insufficient permissions | Generate a new PAT with Work Items R/W |
-| `401 Unauthorized` from webhook | `WEBHOOK_SECRET` is set but the sender isn't signing requests | Either configure signing in Azure DevOps or remove `WEBHOOK_SECRET` |
-| `429 Too Many Requests` from the bot | Rate limiter triggered | Increase `RATE_LIMIT_MAX` or `RATE_LIMIT_WINDOW_MS` |
-| `429 Too Many Requests` from AI API | Rate limit hit | Built-in retry with backoff handles this automatically. Consider upgrading your API plan |
-| Function times out (no response) | AI provider is slow or unresponsive | Increase `AI_TIMEOUT_MS` or switch to a faster model/provider |
-| Comment not posted to work item | Missing `System.TeamProject` in webhook payload | Ensure the webhook subscription includes project context |
-| AI analysis shows "Temporarily Unavailable" | AI API was unreachable during processing | Check AI API status; the bot degrades gracefully and returns 200 |
+|---------|-------------|-----|
+| `Missing required environment variables` | `local.settings.json` missing or incomplete | Set all four required vars |
+| AI returns raw text instead of JSON | Model ignores JSON instruction | Parser handles gracefully; try a more capable model |
+| `401` from Azure DevOps | PAT expired or insufficient permissions | Regenerate PAT with Work Items R/W, Code R/W |
+| `429 Too Many Requests` from bot | Rate limiter triggered | Increase `RATE_LIMIT_MAX` |
+| `429` from AI API | Provider rate limit | Built-in retry handles this; consider upgrading plan |
+| Function times out | AI provider slow | Increase `AI_TIMEOUT_MS` or use faster model |
+| "AI Temporarily Unavailable" comment | AI API unreachable | Bot degrades gracefully; check AI provider status |
+| PR review missing some files | AI response truncated | Check logs for truncation warning; reduce batch size |
+| Flaky detective shows empty | No builds ingested yet | Run a pipeline and check the `/report` endpoint |
 
 ---
 
