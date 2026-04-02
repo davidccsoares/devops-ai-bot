@@ -54,7 +54,7 @@ async function fetchLinkedWorkItems(project, repoId, prId, headers, context) {
       title: wi.fields["System.Title"],
       state: wi.fields["System.State"],
       description: stripHtml(wi.fields["System.Description"]),
-      acceptanceCriteria: stripHtml(wi.fields["Microsoft.VSAT.Common.AcceptanceCriteria"] || ""),
+      acceptanceCriteria: stripHtml(wi.fields["Microsoft.VSTS.Common.AcceptanceCriteria"] || ""),
       tags: wi.fields["System.Tags"] || "",
       _relations: wi.relations || [],
     }));
@@ -81,7 +81,7 @@ async function fetchLinkedWorkItems(project, repoId, prId, headers, context) {
             type: pw.fields["System.WorkItemType"],
             title: pw.fields["System.Title"],
             description: stripHtml(pw.fields["System.Description"]),
-            acceptanceCriteria: stripHtml(pw.fields["Microsoft.VSAT.Common.AcceptanceCriteria"] || ""),
+            acceptanceCriteria: stripHtml(pw.fields["Microsoft.VSTS.Common.AcceptanceCriteria"] || ""),
           };
         }
       }

@@ -31,6 +31,7 @@ EXAMPLE INPUT:
 WORK ITEM TYPE: User Story
 TITLE: Add password reset
 DESCRIPTION: Users should be able to reset their password.
+ACCEPTANCE CRITERIA: (none provided)
 
 EXAMPLE OUTPUT:
 {
@@ -47,16 +48,22 @@ const { sanitizeInput } = require("../utils/sanitizeInput");
 /**
  * Builds the user message containing the work-item data to analyse.
  *
- * @param {object} workItem - { title, description, workItemType }
+ * @param {object} workItem - { title, description, acceptanceCriteria, workItemType }
  * @returns {string}
  */
 function buildUserMessage(workItem) {
+  const ac = workItem.acceptanceCriteria
+    ? sanitizeInput(workItem.acceptanceCriteria, "acceptanceCriteria")
+    : "(none provided)";
+
   return `Analyse the following work item and return the JSON quality report.
 
 WORK ITEM TYPE: ${sanitizeInput(workItem.workItemType, "workItemType")}
 TITLE: ${sanitizeInput(workItem.title, "title")}
 DESCRIPTION:
-${sanitizeInput(workItem.description, "description")}`;
+${sanitizeInput(workItem.description, "description")}
+ACCEPTANCE CRITERIA:
+${ac}`;
 }
 
 module.exports = { getSystemPrompt, buildUserMessage };

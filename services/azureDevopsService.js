@@ -43,6 +43,7 @@ function extractWorkItemDataFromWebhook(payload) {
     id: resource.id || resource.workItemId || null,
     title: fields["System.Title"] || "(no title)",
     description: fields["System.Description"] || "(no description)",
+    acceptanceCriteria: fields["Microsoft.VSTS.Common.AcceptanceCriteria"] || "",
     workItemType: fields["System.WorkItemType"] || "Unknown",
     project:
       fields["System.TeamProject"] ||

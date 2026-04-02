@@ -30,6 +30,7 @@ EXAMPLE INPUT:
 WORK ITEM TYPE: User Story
 TITLE: Add OAuth2 login with Google
 DESCRIPTION: Implement Google OAuth2 login flow including callback handling, token storage, and session creation.
+ACCEPTANCE CRITERIA: (none provided)
 
 EXAMPLE OUTPUT:
 {
@@ -45,16 +46,22 @@ const { sanitizeInput } = require("../utils/sanitizeInput");
 /**
  * Builds the user message for time estimation.
  *
- * @param {object} workItem - { title, description, workItemType }
+ * @param {object} workItem - { title, description, acceptanceCriteria, workItemType }
  * @returns {string}
  */
 function buildUserMessage(workItem) {
+  const ac = workItem.acceptanceCriteria
+    ? sanitizeInput(workItem.acceptanceCriteria, "acceptanceCriteria")
+    : "(none provided)";
+
   return `Estimate the effort for the following work item and return the JSON report.
 
 WORK ITEM TYPE: ${sanitizeInput(workItem.workItemType, "workItemType")}
 TITLE: ${sanitizeInput(workItem.title, "title")}
 DESCRIPTION:
-${sanitizeInput(workItem.description, "description")}`;
+${sanitizeInput(workItem.description, "description")}
+ACCEPTANCE CRITERIA:
+${ac}`;
 }
 
 module.exports = { getSystemPrompt, buildUserMessage };

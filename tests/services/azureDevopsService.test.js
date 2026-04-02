@@ -16,6 +16,7 @@ describe("extractWorkItemDataFromWebhook", () => {
           "System.Description": "Implement OAuth2.",
           "System.WorkItemType": "User Story",
           "System.TeamProject": "MyProject",
+          "Microsoft.VSTS.Common.AcceptanceCriteria": "<li>Login works</li>",
         },
       },
     };
@@ -24,6 +25,7 @@ describe("extractWorkItemDataFromWebhook", () => {
     assert.equal(result.id, 42);
     assert.equal(result.title, "Add user auth");
     assert.equal(result.description, "Implement OAuth2.");
+    assert.equal(result.acceptanceCriteria, "<li>Login works</li>");
     assert.equal(result.workItemType, "User Story");
     assert.equal(result.project, "MyProject");
   });
@@ -33,6 +35,7 @@ describe("extractWorkItemDataFromWebhook", () => {
     assert.equal(result.id, null);
     assert.equal(result.title, "(no title)");
     assert.equal(result.description, "(no description)");
+    assert.equal(result.acceptanceCriteria, "");
     assert.equal(result.workItemType, "Unknown");
     assert.equal(result.project, null);
     assert.equal(result.url, null);
