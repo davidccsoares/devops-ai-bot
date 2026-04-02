@@ -35,10 +35,86 @@ And **2 endpoints that need NO webhooks** (on-demand):
 
 Before starting, confirm these are done:
 
-- [ ] Function App is **deployed and running** in Azure
-- [ ] All **Application Settings** are configured in the Azure Portal (the env vars from `local.settings.json`)
+- [ ] Function App is **deployed and running** in Azure (see [Deploying](#deploying-to-azure) below)
+- [ ] All **Application Settings** are configured in the Azure Portal (see [AI Provider Setup](#ai-provider-setup) + env vars from `local.settings.json`)
 - [ ] PAT has permissions: **Work Items: Read & Write**, **Code: Read & Write**, **Build: Read**
 - [ ] You have the **Function Keys** for each endpoint (see Step 0)
+- [ ] An **AI API key** from one of the supported providers (see below)
+
+---
+
+## Deploying to Azure
+
+### 1. Install prerequisites
+
+```bash
+npm i -g azure-functions-core-tools@4
+# Install Azure CLI: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli
+```
+
+### 2. Login and deploy
+
+```bash
+az login
+func azure functionapp publish devops-ai-bot-bindtuning
+```
+
+### 3. Set Application Settings
+
+```bash
+az functionapp config appsettings set \
+  --name devops-ai-bot-bindtuning \
+  --resource-group <your-resource-group> \
+  --settings \
+    AZURE_DEVOPS_ORG="https://dev.azure.com/bindtuning" \
+    AZURE_DEVOPS_PAT="<your-pat>" \
+    AI_API_URL="https://api.groq.com/openai/v1/chat/completions" \
+    AI_API_KEY="<your-groq-key>" \
+    AI_MODEL="meta-llama/llama-4-scout-17b-16e-instruct" \
+    AI_MODEL_REVIEW="llama-3.3-70b-versatile" \
+    AI_MODEL_CHEAP="llama-3.1-8b-instant" \
+    AZURE_PROJECT="BindTuning"
+```
+
+---
+
+## AI Provider Setup
+
+The bot uses any **OpenAI-compatible** chat completions API. The default (and recommended) provider is **[Groq](https://console.groq.com)** which offers generous free-tier access.
+
+### Recommended: Groq (free tier — 30 req/min)
+
+1. Sign up at [console.groq.com](https://console.groq.com)
+2. Create an API key
+3. Set these Application Settings:
+
+| Setting | Value |
+|---------|-------|
+| `AI_API_URL` | `https://api.groq.com/openai/v1/chat/completions` |
+| `AI_API_KEY` | Your Groq API key |
+| `AI_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` (default — best balance of speed + quality) |
+| `AI_MODEL_REVIEW` | `llama-3.3-70b-versatile` (used for PR code reviews — higher quality) |
+| `AI_MODEL_CHEAP` | `llama-3.1-8b-instant` (used for PR summaries — fastest) |
+
+### Alternative: Google AI Studio (free tier — 500 req/day)
+
+| Setting | Value |
+|---------|-------|
+| `AI_API_URL` | `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions` |
+| `AI_API_KEY` | Your Google AI Studio API key |
+| `AI_MODEL` | `gemini-2.5-flash` |
+
+### Alternative: OpenRouter (free models — 50 req/day)
+
+| Setting | Value |
+|---------|-------|
+| `AI_API_URL` | `https://openrouter.ai/api/v1/chat/completions` |
+| `AI_API_KEY` | Your OpenRouter API key |
+| `AI_MODEL` | Any free model (e.g. `liquid/lfm-2.5-1.2b-instruct:free`) |
+
+### Alternative: Any OpenAI-compatible API
+
+Any API that supports the `/v1/chat/completions` format works (OpenAI, Azure OpenAI, local Ollama, etc.). Just set `AI_API_URL` and `AI_API_KEY` accordingly.
 
 ---
 
@@ -336,12 +412,64 @@ This is more reliable since you control exactly what `buildId` is sent.
 | 401 Unauthorized in Function logs | PAT expired or wrong — regenerate with Work Items R/W, Code R/W, Build Read |
 | 403 from Azure DevOps API | PAT missing required scope — needs Work Items R/W for comments, Code R/W for PR threads |
 | 500 Internal Server Error | Check Function App logs — likely missing env var (AI_API_URL, AI_API_KEY, etc.) |
-| "AI Temporarily Unavailable" comment | AI API (OpenRouter) was down or rate-limited — check again later |
+| "AI Temporarily Unavailable" comment | AI API was down or rate-limited — check provider status (Groq, Google AI Studio, etc.) |
 | Comment on create but not on update | Verify you changed **Title** or **Description** — changes to State/AssignedTo/Priority are intentionally skipped |
 | PR review never appears | Check Service Hook delivery — ensure the payload includes `lastMergeSourceCommit.commitId` |
 | "Duplicate event skipped" in logs | Normal — the dedup cache prevents reprocessing the same event within 5 min (work items) or 1 hour (PRs) |
 | Test notification works but real events don't | The webhook filter (Area path, Work item type, Repository, Branch) doesn't match your actual items |
 | Flaky Detective shows empty dashboard | Either no builds have been ingested yet, or the pipeline didn't have test runs |
+
+---
+
+## All Environment Variables
+
+Complete reference of all Application Settings (environment variables) the bot uses.
+
+### Required
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `AZURE_DEVOPS_ORG` | Azure DevOps org URL | `https://dev.azure.com/bindtuning` |
+| `AZURE_DEVOPS_PAT` | Personal Access Token (Work Items R/W, Code R/W, Build Read) | `xxxxxxxx` |
+| `AI_API_URL` | AI chat completions endpoint (any OpenAI-compatible API) | `https://api.groq.com/openai/v1/chat/completions` |
+| `AI_API_KEY` | API key for the AI service | `gsk_xxxxxxxx` |
+
+### AI Models
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AI_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` | Model for ticket analysis + time estimation (JSON mode) |
+| `AI_MODEL_REVIEW` | _(same as AI_MODEL)_ | Model for PR code reviews (higher quality recommended) |
+| `AI_MODEL_CHEAP` | _(same as AI_MODEL)_ | Model for PR summaries (fastest/cheapest) |
+
+### Timeouts & Retry
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AI_TIMEOUT_MS` | `30000` | AI API call timeout (ms) |
+| `AI_MAX_RETRIES` | `3` | AI API retry attempts on transient failures |
+| `AI_MAX_RESPONSE_SIZE` | `102400` | Max AI response size (chars) before truncation |
+| `DEVOPS_TIMEOUT_MS` | `30000` | Azure DevOps API call timeout (ms) |
+| `DEVOPS_MAX_RETRIES` | `3` | Azure DevOps API retry attempts |
+
+### Security & Rate Limiting
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WEBHOOK_SECRET` | _(empty)_ | HMAC-SHA256 secret for webhook signature verification |
+| `DEDUP_TTL_MS` | `300000` | Dedup cache TTL — 5 min (prevents duplicate processing) |
+| `RATE_LIMIT_MAX` | `60` | Max requests per rate-limit window |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window duration — 1 min |
+
+### Playwright Test Generation
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AZURE_PROJECT` | `BindTuning` | Azure DevOps project name |
+| `PLAYWRIGHT_REPO_NAME` | `BindTuning.AdminApp` | Repo that triggers Playwright test generation |
+| `PLAYWRIGHT_TARGET_BRANCH` | `refs/heads/Dev` | Target branch that triggers test gen |
+| `PLAYWRIGHT_TEST_BRANCH` | `internship/playwright-unit-tests` | Branch to push generated tests to |
+| `PIPELINE_ID` | `88` | Pipeline to trigger after pushing tests |
 
 ---
 
@@ -370,9 +498,12 @@ This is more reliable since you control exactly what `buildId` is sent.
 
 ## Checklist
 
-Copy this to track your progress tomorrow:
+Copy this to track your progress:
 
 ```
+[ ] Deploy: az login + func azure functionapp publish devops-ai-bot-bindtuning
+[ ] Deploy: Set all Application Settings (az functionapp config appsettings set ...)
+[ ] AI Setup: Groq API key created and set as AI_API_KEY
 [ ] Step 0: Get function keys for devops-webhook, pr-review-gateway, flaky-detective
 [ ] Step 0: Smoke test — curl health endpoint, get "healthy"
 [ ] Step 0: Smoke test — curl webhook endpoint, get "Missing eventType" error

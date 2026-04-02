@@ -110,7 +110,7 @@ devops-ai-bot/
   - Work Items: Read & Write
   - Code: Read & Write
   - Build: Read
-- An **AI API key** — defaults to [OpenRouter](https://openrouter.ai) free models, but any OpenAI-compatible API works
+- An **AI API key** — defaults to [Groq](https://console.groq.com) free models, but any OpenAI-compatible API works (OpenRouter, Google AI Studio, etc.)
 
 ---
 
@@ -146,7 +146,7 @@ Never commit `local.settings.json` (it's in `.gitignore`).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AI_MODEL` | `mistralai/mistral-7b-instruct:free` | Model for ticket/time analysis (JSON mode) |
+| `AI_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` | Model for ticket/time analysis (JSON mode) |
 | `AI_MODEL_REVIEW` | (same as AI_MODEL) | Model for PR code review |
 | `AI_MODEL_CHEAP` | (same as AI_MODEL) | Model for PR summaries |
 | `AZURE_PROJECT` | `BindTuning` | Default Azure DevOps project name |
@@ -219,7 +219,7 @@ az functionapp config appsettings set \
   --settings \
     AZURE_DEVOPS_ORG="https://dev.azure.com/<your-org>" \
     AZURE_DEVOPS_PAT="<your-pat>" \
-    AI_API_URL="https://openrouter.ai/api/v1/chat/completions" \
+    AI_API_URL="https://api.groq.com/openai/v1/chat/completions" \
     AI_API_KEY="<your-key>"
 ```
 

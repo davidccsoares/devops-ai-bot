@@ -7,9 +7,9 @@
     "AZURE_DEVOPS_ORG": "https://dev.azure.com/YOUR_ORG",
     "AZURE_DEVOPS_PAT": "YOUR_PERSONAL_ACCESS_TOKEN",
 
-    "AI_API_URL": "https://openrouter.ai/api/v1/chat/completions",
-    "AI_API_KEY": "YOUR_AI_API_KEY",
-    "AI_MODEL": "mistralai/mistral-7b-instruct:free",
+    "AI_API_URL": "https://api.groq.com/openai/v1/chat/completions",
+    "AI_API_KEY": "YOUR_GROQ_API_KEY",
+    "AI_MODEL": "meta-llama/llama-4-scout-17b-16e-instruct",
 
     "AI_TIMEOUT_MS": "30000",
     "AI_MAX_RETRIES": "3",
@@ -22,8 +22,8 @@
     "RATE_LIMIT_MAX": "60",
     "RATE_LIMIT_WINDOW_MS": "60000",
 
-    "AI_MODEL_REVIEW": "mistralai/mistral-small-3.1-24b-instruct:free",
-    "AI_MODEL_CHEAP": "meta-llama/llama-3.2-3b-instruct:free",
+    "AI_MODEL_REVIEW": "llama-3.3-70b-versatile",
+    "AI_MODEL_CHEAP": "llama-3.1-8b-instant",
 
     "PLAYWRIGHT_REPO_NAME": "BindTuning.AdminApp",
     "PLAYWRIGHT_TARGET_BRANCH": "refs/heads/Dev",

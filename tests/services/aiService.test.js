@@ -251,6 +251,6 @@ describe("callAI", () => {
 
     const ctx = mockContext();
     await callAI("system", "user", ctx);
-    assert.equal(capturedBody.model, "mistralai/mistral-7b-instruct:free");
+    assert.equal(capturedBody.model, "meta-llama/llama-4-scout-17b-16e-instruct");
   });
 });

@@ -13,7 +13,7 @@ const { fetchWithRetry } = require("../utils/fetchWithRetry");
 async function callAI(systemPrompt, userMessage, context) {
   const AI_API_URL = process.env.AI_API_URL;
   const AI_API_KEY = process.env.AI_API_KEY;
-  const AI_MODEL = process.env.AI_MODEL || "mistralai/mistral-7b-instruct:free";
+  const AI_MODEL = process.env.AI_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
   const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000;
   const AI_MAX_RETRIES = parseInt(process.env.AI_MAX_RETRIES, 10) || 3;
   const AI_MAX_RESPONSE_SIZE = parseInt(process.env.AI_MAX_RESPONSE_SIZE, 10) || 102400; // 100KB
@@ -142,7 +142,7 @@ function parseAIResponse(raw, context) {
 async function callAIRaw(systemPrompt, userMessage, context, opts = {}) {
   const AI_API_URL = process.env.AI_API_URL;
   const AI_API_KEY = process.env.AI_API_KEY;
-  const model = opts.model || process.env.AI_MODEL_REVIEW || process.env.AI_MODEL || "mistralai/mistral-7b-instruct:free";
+  const model = opts.model || process.env.AI_MODEL_REVIEW || process.env.AI_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
   const maxTokens = opts.maxTokens || 1024;
   const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000;
   const AI_MAX_RETRIES = parseInt(process.env.AI_MAX_RETRIES, 10) || 3;

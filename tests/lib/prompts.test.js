@@ -22,7 +22,7 @@ describe("buildDiffBlock", () => {
   });
 
   it("respects MAX_DIFF_SIZE budget and stops adding files", () => {
-    const bigDiff = "x".repeat(50000);
+    const bigDiff = "x".repeat(59950);
     const fileChanges = [
       { path: "/a.ts", diff: bigDiff, isAdd: false },
       { path: "/b.ts", diff: "small", isAdd: false },
