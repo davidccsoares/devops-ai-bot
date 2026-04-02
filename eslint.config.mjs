@@ -25,6 +25,7 @@ export default [
         URL: "readonly",
         AbortController: "readonly",
         fetch: "readonly",
+        Response: "readonly",
         global: "readonly",
         describe: "readonly",
         it: "readonly",

@@ -7,3 +7,6 @@ obj/
 WEBHOOK-SETUP-PLAN.md
 coverage/
 *.log
+tests/benchmark-*-results.json
+tests/benchmark-results.json
+tests/benchmark-responses.json
