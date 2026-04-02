@@ -53,7 +53,14 @@ const analyzeTicket = createHandler({
   formatComment,
   postComment: async (workItem, comment, context) => {
     if (workItem.id && workItem.project) {
-      await postCommentToWorkItem(workItem.project, workItem.id, comment, context);
+      // Mention the work item creator so they get notified.
+      let mentionPrefix = "";
+      if (workItem.createdBy && workItem.createdById) {
+        mentionPrefix =
+          `<div><a href="#" data-vss-mention="version:2.0,${workItem.createdById}">` +
+          `@${escapeHtml(workItem.createdBy)}</a></div>\n`;
+      }
+      await postCommentToWorkItem(workItem.project, workItem.id, mentionPrefix + comment, context);
     } else {
       context.log.warn("Missing work-item ID or project - skipping comment post.");
     }

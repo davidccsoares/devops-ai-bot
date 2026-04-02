@@ -39,12 +39,16 @@ function extractWorkItemDataFromWebhook(payload) {
   const resource = payload.resource || {};
   const fields = resource.fields || {};
 
+  const createdByField = fields["System.CreatedBy"] || {};
+
   return {
     id: resource.id || resource.workItemId || null,
     title: fields["System.Title"] || "(no title)",
     description: fields["System.Description"] || "(no description)",
     acceptanceCriteria: fields["Microsoft.VSTS.Common.AcceptanceCriteria"] || "",
     workItemType: fields["System.WorkItemType"] || "Unknown",
+    createdBy: createdByField.displayName || null,
+    createdById: createdByField.id || null,
     project:
       fields["System.TeamProject"] ||
       payload?.resourceContainers?.project?.id ||
